@@ -1,0 +1,5 @@
+{
+  "name": "WealthWise AI (Cyberpunk)",
+  "description": "一個本地存儲、安全且具備賽博朋克風格的個人資產負債表與記帳應用，由 Gemini AI 提供智能財務洞察。",
+  "requestFramePermissions": []
+}
