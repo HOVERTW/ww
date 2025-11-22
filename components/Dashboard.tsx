@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { FinancialData } from '../types';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, AreaChart, Area } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Wallet, TrendingUp, TrendingDown, PiggyBank, Activity } from 'lucide-react';
 
 interface DashboardProps {
@@ -117,7 +117,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     }
 
     // 4. Build Daily Change Map
-    // Note: Transfers do not affect Net Worth (Asset -> Asset is neutral, Asset -> Liability reduces both but NW stays same)
     const changesByDay: Record<string, number> = {};
     sortedTxns.forEach(t => {
       let impact = 0;
@@ -192,7 +191,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       {/* Top Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {/* Net Worth */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-cyan-500/50 transition-colors">
+        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-cyan-500/50 transition-colors">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500 to-blue-500"></div>
           <div className="flex items-center space-x-3 mb-2">
             <div className="p-2 bg-cyan-900/30 rounded-lg text-cyan-400 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]">
@@ -206,7 +205,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
         </div>
 
         {/* Total Assets */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-colors">
+        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-colors">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-green-500"></div>
           <div className="flex items-center space-x-3 mb-2">
             <div className="p-2 bg-emerald-900/30 rounded-lg text-emerald-400 border border-emerald-500/30">
@@ -218,7 +217,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
         </div>
 
         {/* Total Liabilities */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-rose-500/50 transition-colors">
+        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-rose-500/50 transition-colors">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-rose-500 to-red-500"></div>
           <div className="flex items-center space-x-3 mb-2">
             <div className="p-2 bg-rose-900/30 rounded-lg text-rose-400 border border-rose-500/30">
@@ -230,7 +229,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
         </div>
         
         {/* Saved */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-amber-500/50 transition-colors">
+        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-amber-500/50 transition-colors">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-yellow-500"></div>
           <div className="flex items-center space-x-3 mb-2">
             <div className="p-2 bg-amber-900/30 rounded-lg text-amber-400 border border-amber-500/30">
@@ -245,7 +244,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       </div>
 
       {/* Net Worth History Chart */}
-      <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg h-[350px] flex flex-col relative group">
+      <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg h-[350px] flex flex-col relative group">
           <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-cyan-500 to-transparent opacity-50"></div>
           
           <div className="absolute top-4 right-4 flex flex-col items-end pointer-events-none hidden sm:flex">
@@ -258,14 +257,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             </div>
           </div>
 
-          <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono tracking-wide">
+          <h3 className="text-base sm:text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono tracking-wide">
             <Activity size={18} className="text-cyan-400" />
-            淨資產趨勢曲線 (NET WORTH HISTORY)
+            淨資產趨勢曲線 (NET WORTH)
           </h3>
           
           <div className="flex-1 w-full">
              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={netWorthHistory} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <AreaChart data={netWorthHistory} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                   <defs>
                     <linearGradient id="colorNetWorth" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.4}/>
@@ -279,12 +278,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
                     tickLine={false} 
                     tick={{fill: '#64748b', fontSize: 10, fontFamily: 'Share Tech Mono'}} 
                     minTickGap={30}
+                    tickMargin={10}
                   />
                   <YAxis 
                     axisLine={false} 
                     tickLine={false} 
                     tick={{fill: '#64748b', fontSize: 10, fontFamily: 'Share Tech Mono'}}
-                    tickFormatter={(value) => `$${value >= 1000 ? (value/1000).toFixed(1) + 'k' : value}`}
+                    tickFormatter={(value) => `$${value >= 1000 ? (value/1000).toFixed(0) + 'k' : value}`}
                   />
                   <Tooltip cursor={{stroke: '#22d3ee', strokeWidth: 1, strokeDasharray: '5 5'}} content={<CustomTooltip />} />
                   <Area 
@@ -304,9 +304,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Asset Allocation Pie Chart */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg h-[400px] flex flex-col relative">
+        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg h-[400px] flex flex-col relative">
           <div className="absolute top-0 right-0 p-2 text-xs text-slate-600 font-tech hidden sm:block">SYS.DIAG.ASSET</div>
-          <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono">
+          <h3 className="text-base sm:text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono">
              <span className="w-1 h-4 bg-emerald-500 inline-block"></span>
              資產配置 (Allocation)
           </h3>
@@ -341,11 +341,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-mono">
                {assetsByType.slice(0, 6).map((item, idx) => (
                  <div key={item.name} className="flex items-center justify-between border-b border-slate-800 pb-1">
-                   <div className="flex items-center">
-                     <span className="w-2 h-2 rounded-sm mr-2 shadow-[0_0_5px_currentColor]" style={{ backgroundColor: COLORS[idx % COLORS.length], color: COLORS[idx % COLORS.length] }}></span>
-                     <span className="truncate max-w-[100px] text-slate-400">{item.name}</span>
+                   <div className="flex items-center min-w-0">
+                     <span className="w-2 h-2 rounded-sm mr-2 shadow-[0_0_5px_currentColor] flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length], color: COLORS[idx % COLORS.length] }}></span>
+                     <span className="truncate text-slate-400">{item.name}</span>
                    </div>
-                   <span className="font-medium text-slate-300">${item.value.toLocaleString()}</span>
+                   <span className="font-medium text-slate-300 ml-2">${item.value.toLocaleString()}</span>
                  </div>
                ))}
             </div>
@@ -353,9 +353,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
         </div>
 
         {/* Expense Breakdown (Existing) */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg h-[400px] flex flex-col relative">
+        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg h-[400px] flex flex-col relative">
           <div className="absolute top-0 right-0 p-2 text-xs text-slate-600 font-tech hidden sm:block">SYS.DIAG.EXP</div>
-          <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono">
+          <h3 className="text-base sm:text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono">
              <span className="w-1 h-4 bg-fuchsia-500 inline-block"></span>
              支出類別分析
           </h3>
@@ -390,11 +390,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-mono">
                {expenseByCategory.slice(0, 6).map((item, idx) => (
                  <div key={item.name} className="flex items-center justify-between border-b border-slate-800 pb-1">
-                   <div className="flex items-center">
-                     <span className="w-2 h-2 rounded-sm mr-2 shadow-[0_0_5px_currentColor]" style={{ backgroundColor: COLORS[idx % COLORS.length], color: COLORS[idx % COLORS.length] }}></span>
-                     <span className="truncate max-w-[100px] text-slate-400">{item.name}</span>
+                   <div className="flex items-center min-w-0">
+                     <span className="w-2 h-2 rounded-sm mr-2 shadow-[0_0_5px_currentColor] flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length], color: COLORS[idx % COLORS.length] }}></span>
+                     <span className="truncate text-slate-400">{item.name}</span>
                    </div>
-                   <span className="font-medium text-slate-300">${item.value.toLocaleString()}</span>
+                   <span className="font-medium text-slate-300 ml-2">${item.value.toLocaleString()}</span>
                  </div>
                ))}
             </div>
