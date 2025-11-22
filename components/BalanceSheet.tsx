@@ -236,13 +236,13 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
 
   const getAssetTypeLabel = (type: AssetType) => {
       switch(type) {
-          case 'cash': return '現金/存款 (Cash)';
-          case 'tw_stock': return '台股 (TW Stock)';
-          case 'us_stock': return '美股 (US Stock)';
-          case 'crypto': return '加密貨幣 (Crypto)';
-          case 'investment': return '其他投資 (Invest)';
-          case 'property': return '不動產 (Property)';
-          case 'other': return '其他資產 (Other)';
+          case 'cash': return '現金/存款';
+          case 'tw_stock': return '台股';
+          case 'us_stock': return '美股';
+          case 'crypto': return '加密貨幣';
+          case 'investment': return '其他投資';
+          case 'property': return '不動產';
+          case 'other': return '其他';
           default: return type;
       }
   }
@@ -348,24 +348,24 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
         <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl border border-emerald-500/20 shadow-lg overflow-hidden">
           {assets.map(item => (
             <div key={item.id} className="p-4 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 group transition-all">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-emerald-900/20 text-emerald-400 rounded-lg border border-emerald-500/20">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="p-2 bg-emerald-900/20 text-emerald-400 rounded-lg border border-emerald-500/20 flex-shrink-0">
                     {getAssetIcon(item.type)}
                   </div>
-                  <div>
+                  <div className="truncate">
                     <div className="flex items-center gap-2">
-                      <p className="font-medium text-slate-200">{item.name}</p>
-                      {item.symbol && <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded text-slate-300 font-mono">{item.symbol}</span>}
+                      <p className="font-medium text-slate-200 truncate">{item.name}</p>
+                      {item.symbol && <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded text-slate-300 font-mono flex-shrink-0">{item.symbol}</span>}
                     </div>
-                    <p className="text-xs text-slate-500 font-mono">{getAssetTypeLabel(item.type)}</p>
+                    <p className="text-xs text-slate-500 font-mono truncate">{getAssetTypeLabel(item.type)}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 sm:gap-4">
+                <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
                   <div className="text-right">
                     <span className="font-semibold text-emerald-100 font-mono text-lg">${item.value.toLocaleString()}</span>
                     {(item.currency === 'USD' || item.type === 'us_stock' || item.type === 'crypto') && (
-                      <p className="text-[10px] text-slate-500 font-mono text-right">TWD Equivalent</p>
+                      <p className="text-[10px] text-slate-500 font-mono text-right">TWD Eq.</p>
                     )}
                   </div>
                   
@@ -601,17 +601,17 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
 
         <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl border border-rose-500/20 shadow-lg overflow-hidden">
           {liabilities.map(item => (
-            <div key={item.id} className="flex items-center justify-between p-4 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 group transition-all">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-rose-900/20 text-rose-400 rounded-lg border border-rose-500/20">
+            <div key={item.id} className="flex items-center justify-between gap-2 p-4 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 group transition-all">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="p-2 bg-rose-900/20 text-rose-400 rounded-lg border border-rose-500/20 flex-shrink-0">
                   <CreditCard size={18} />
                 </div>
-                <div>
-                  <p className="font-medium text-slate-200">{item.name}</p>
-                  <p className="text-xs text-slate-500 font-mono">{getLiabilityTypeLabel(item.type)}</p>
+                <div className="truncate">
+                  <p className="font-medium text-slate-200 truncate">{item.name}</p>
+                  <p className="text-xs text-slate-500 font-mono truncate">{getLiabilityTypeLabel(item.type)}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 sm:gap-4">
+              <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
                 <span className="font-semibold text-rose-100 font-mono">${item.value.toLocaleString()}</span>
                 <div className="flex gap-1">
                     <button onClick={() => handleEditLiability(item)} className="text-slate-600 hover:text-rose-400 transition-colors p-1 opacity-60 group-hover:opacity-100">

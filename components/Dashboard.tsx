@@ -248,7 +248,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg h-[350px] flex flex-col relative group">
           <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-cyan-500 to-transparent opacity-50"></div>
           
-          <div className="absolute top-4 right-4 flex flex-col items-end pointer-events-none">
+          <div className="absolute top-4 right-4 flex flex-col items-end pointer-events-none hidden sm:flex">
             <div className="text-[10px] text-cyan-500 font-tech animate-pulse flex items-center gap-1">
                <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full"></span>
                AI_TIMELINE_ADAPTIVE
@@ -305,7 +305,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Asset Allocation Pie Chart */}
         <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg h-[400px] flex flex-col relative">
-          <div className="absolute top-0 right-0 p-2 text-xs text-slate-600 font-tech">SYS.DIAG.ASSET</div>
+          <div className="absolute top-0 right-0 p-2 text-xs text-slate-600 font-tech hidden sm:block">SYS.DIAG.ASSET</div>
           <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono">
              <span className="w-1 h-4 bg-emerald-500 inline-block"></span>
              資產配置 (Allocation)
@@ -354,7 +354,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
         {/* Expense Breakdown (Existing) */}
         <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg h-[400px] flex flex-col relative">
-          <div className="absolute top-0 right-0 p-2 text-xs text-slate-600 font-tech">SYS.DIAG.EXP</div>
+          <div className="absolute top-0 right-0 p-2 text-xs text-slate-600 font-tech hidden sm:block">SYS.DIAG.EXP</div>
           <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono">
              <span className="w-1 h-4 bg-fuchsia-500 inline-block"></span>
              支出類別分析

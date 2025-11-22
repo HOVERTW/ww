@@ -738,51 +738,52 @@ export const Transactions: React.FC<TransactionsProps> = ({
               <table className="w-full text-sm text-left">
                 <thead className="bg-slate-800/50 text-cyan-500 font-mono uppercase text-xs border-b border-slate-700">
                   <tr>
-                    <th className="px-6 py-4">日期</th>
-                    <th className="px-6 py-4">類別</th>
-                    <th className="px-6 py-4">資金流向</th>
-                    <th className="px-6 py-4">備註</th>
-                    <th className="px-6 py-4 text-right">金額</th>
-                    <th className="px-6 py-4 text-center">操作</th>
+                    <th className="px-4 py-3 whitespace-nowrap">日期</th>
+                    <th className="px-4 py-3 whitespace-nowrap">類別</th>
+                    <th className="px-4 py-3 whitespace-nowrap">資金流向</th>
+                    <th className="px-4 py-3 whitespace-nowrap">備註</th>
+                    <th className="px-4 py-3 text-right whitespace-nowrap">金額</th>
+                    <th className="px-4 py-3 text-center whitespace-nowrap">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {filteredTransactions.length > 0 ? filteredTransactions.map((t) => (
                     <tr key={t.id} className="hover:bg-slate-800/50 transition-colors group">
-                      <td className="px-6 py-4 whitespace-nowrap text-slate-400 font-mono">{t.date}</td>
-                      <td className="px-6 py-4 font-medium text-slate-200 flex items-center gap-2">
-                        {t.type === 'income' && <ArrowUpCircle size={16} className="text-emerald-500" />}
-                        {t.type === 'expense' && <ArrowDownCircle size={16} className="text-rose-500" />}
-                        {t.type === 'transfer' && <ArrowRightLeft size={16} className="text-slate-400" />}
+                      <td className="px-4 py-3 whitespace-nowrap text-slate-400 font-mono">{t.date}</td>
+                      <td className="px-4 py-3 font-medium text-slate-200 flex items-center gap-2 whitespace-nowrap">
+                        {t.type === 'income' && <ArrowUpCircle size={16} className="text-emerald-500 flex-shrink-0" />}
+                        {t.type === 'expense' && <ArrowDownCircle size={16} className="text-rose-500 flex-shrink-0" />}
+                        {t.type === 'transfer' && <ArrowRightLeft size={16} className="text-slate-400 flex-shrink-0" />}
                         {t.category}
                       </td>
-                      <td className="px-6 py-4 text-slate-400 font-mono text-xs">
+                      <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">
                          {t.type === 'transfer' ? (
                            <div className="flex items-center gap-2">
                               <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700 truncate max-w-[80px]">
                                 {getSourceName(t.sourceId, t.sourceType)}
                               </span>
-                              <ArrowRight size={12} className="text-cyan-500" />
+                              <ArrowRight size={12} className="text-cyan-500 flex-shrink-0" />
                               <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700 truncate max-w-[80px]">
                                 {getSourceName(t.destinationId, t.destinationType)}
                               </span>
                            </div>
                          ) : (
                            t.sourceId ? (
-                             <span className="flex items-center gap-1 px-2 py-1 bg-slate-800 rounded border border-slate-700 w-fit">
-                                 <CreditCard size={12} /> {getSourceName(t.sourceId, t.sourceType)}
+                             <span className="flex items-center gap-1 px-2 py-1 bg-slate-800 rounded border border-slate-700 w-fit max-w-[150px] truncate">
+                                 <CreditCard size={12} className="flex-shrink-0" /> 
+                                 <span className="truncate">{getSourceName(t.sourceId, t.sourceType)}</span>
                              </span>
                            ) : <span className="opacity-30">-</span>
                          )}
                       </td>
-                      <td className="px-6 py-4 text-slate-500">{t.note}</td>
-                      <td className={`px-6 py-4 text-right font-semibold font-mono tracking-wide ${
+                      <td className="px-4 py-3 text-slate-500 min-w-[120px] max-w-[200px] truncate">{t.note}</td>
+                      <td className={`px-4 py-3 text-right font-semibold font-mono tracking-wide whitespace-nowrap ${
                         t.type === 'income' ? 'text-emerald-400' : 
                         t.type === 'expense' ? 'text-slate-200' : 'text-slate-400'
                       }`}>
                         {t.type === 'expense' && '-'}{t.type === 'transfer' && ''}{t.amount.toLocaleString()}
                       </td>
-                      <td className="px-6 py-4 text-center">
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
                         <button 
                           onClick={() => onDeleteTransaction(t.id)}
                           className="text-slate-600 hover:text-rose-500 transition-colors p-1 opacity-50 group-hover:opacity-100"

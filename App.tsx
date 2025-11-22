@@ -367,7 +367,7 @@ function App() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20 md:pb-0 md:pl-64 selection:bg-cyan-500/30 relative">
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-32 md:pb-0 md:pl-64 selection:bg-cyan-500/30 relative">
       
       {/* Background effects */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
@@ -468,7 +468,7 @@ function App() {
       </aside>
 
       {/* Header (Mobile) */}
-      <header className="md:hidden bg-slate-900/90 backdrop-blur-md border-b border-slate-800 p-4 sticky top-0 z-30 flex items-center justify-between">
+      <header className="md:hidden bg-slate-900/90 backdrop-blur-md border-b border-slate-800 p-4 sticky top-0 z-30 flex items-center justify-between shadow-lg">
          <div className="flex items-center gap-2">
             <CyberpunkLogo className="w-9 h-9" />
             <h1 className="text-lg font-bold text-slate-100 font-mono">WealthWise<span className="text-cyan-500">.AI</span></h1>
@@ -484,13 +484,13 @@ function App() {
       </header>
 
       {/* Bottom Navigation (Mobile) */}
-      <nav className="md:hidden fixed bottom-0 left-0 w-full bg-slate-900/90 backdrop-blur-xl border-t border-slate-800 z-30 pb-safe">
+      <nav className="md:hidden fixed bottom-0 left-0 w-full bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-30 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.5)]">
         <div className="flex justify-around p-2">
           {navItems.map(item => (
             <button
               key={item.id}
               onClick={() => setView(item.id)}
-              className={`flex flex-col items-center p-2 rounded-xl transition-colors ${
+              className={`flex flex-col items-center p-2 rounded-xl transition-colors flex-1 ${
                 view === item.id ? 'text-cyan-400' : 'text-slate-600'
               }`}
             >
