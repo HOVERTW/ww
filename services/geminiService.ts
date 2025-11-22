@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { FinancialData } from "../types";
 
@@ -31,7 +32,7 @@ export const analyzeFinances = async (data: FinancialData, userQuery?: string): 
   const context = `
     你是一位專業的個人財務顧問，擁有賽博朋克風格的冷靜與理性。請根據以下提供的財務數據進行分析。請使用繁體中文（台灣用語）回答。
     
-    **財務摘要：**
+    **財務摘要 (TWD)：**
     - 淨資產：$${netWorth.toFixed(2)}
     - 總資產：$${totalAssets.toFixed(2)}
     - 總負債：$${totalLiabilities.toFixed(2)}
@@ -42,7 +43,7 @@ export const analyzeFinances = async (data: FinancialData, userQuery?: string): 
     ${data.transactions.slice(0, 20).map(t => `- [${t.date}] ${t.type === 'income' ? '收入' : '支出'}: $${t.amount} (${t.category}) - ${t.note}`).join('\n')}
 
     **資產列表：**
-    ${data.assets.map(a => `- ${a.name} (${a.type}): $${a.value} ${a.symbol ? `[${a.symbol} 損益: ${((a.currentPrice || 0) - (a.purchasePrice || 0)) * (a.shares || 0)}]` : ''}`).join('\n')}
+    ${data.assets.map(a => `- ${a.name} (${a.type}): $${a.value} ${a.symbol ? `[${a.symbol} 持有:${a.shares} 原幣價:${a.currentPrice} 匯率:${a.currentExchangeRate || 1}]` : ''}`).join('\n')}
 
     **負債列表：**
     ${data.liabilities.map(l => `- ${l.name} (${l.type}): $${l.value}`).join('\n')}
@@ -97,16 +98,28 @@ export const suggestCategoryIcons = async (categoryName: string): Promise<string
   }
 };
 
-export const getStockPrice = async (symbol: string): Promise<{ price: number, currency: string, name: string } | null> => {
+export const getStockPrice = async (symbol: string): Promise<{ price: number, currency: string, name: string, estimatedFxRate?: number } | null> => {
   const ai = getAiClient();
   if (!ai) return null;
 
   const prompt = `
-    Find the current stock price for ticker "${symbol}". 
-    If it is a Taiwan stock (e.g. 2330), assume TWSE/TPEX. If US (e.g. QQQ, NVDA), assume US market.
+    Find the current stock price (or crypto price) for ticker "${symbol}".
+    
+    Rules:
+    1. If it is a Taiwan stock (e.g. 2330, 0050), assume TWSE/TPEX and currency is "TWD".
+    2. If it is a Crypto (e.g. BTC, ETH, USDT, DOGE), assume currency is "USD" (or USDT equivalent).
+    3. If it is a US stock (e.g. NVDA, AAPL, TSLA), assume currency is "USD".
+    
+    CRITICAL:
+    If the currency is "USD", you MUST also find the current USD to TWD exchange rate (e.g., 32.5).
+    
     Return a purely JSON object with no markdown.
-    Format: { "price": number, "currency": "string" (e.g. USD or TWD), "name": "string" (company name) }
-    Example: { "price": 123.45, "currency": "USD", "name": "Apple Inc." }
+    Format: { 
+      "price": number, 
+      "currency": "string" (TWD or USD), 
+      "name": "string" (short descriptive name),
+      "estimatedFxRate": number (Current USD/TWD rate if currency is USD, otherwise null)
+    }
   `;
 
   try {
@@ -118,8 +131,6 @@ export const getStockPrice = async (symbol: string): Promise<{ price: number, cu
       }
     });
     
-    // With search grounding, we might get text or grounding metadata.
-    // We rely on the model to synthesize the search result into the requested JSON format.
     const text = response.text?.trim();
     
     if (!text) return null;
@@ -134,6 +145,42 @@ export const getStockPrice = async (symbol: string): Promise<{ price: number, cu
     return null;
   } catch (error) {
     console.error("Gemini Stock Fetch Error:", error);
+    return null;
+  }
+};
+
+export const getExchangeRate = async (baseCurrency: string = 'USD', targetCurrency: string = 'TWD'): Promise<number | null> => {
+  const ai = getAiClient();
+  if (!ai) return null;
+
+  const prompt = `
+    Find the current exchange rate from ${baseCurrency} to ${targetCurrency}.
+    Example: if 1 USD = 32.5 TWD, return 32.5.
+    
+    Return a purely JSON object with no markdown.
+    Format: { "rate": number }
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+      }
+    });
+    
+    const text = response.text?.trim();
+    if (!text) return null;
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const data = JSON.parse(jsonMatch[0]);
+      return data.rate;
+    }
+    return null;
+  } catch (error) {
+    console.error("Gemini FX Fetch Error:", error);
     return null;
   }
 };

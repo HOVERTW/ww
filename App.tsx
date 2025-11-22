@@ -49,10 +49,32 @@ function App() {
     }
   }, [data, isLoaded]);
 
+  // --- Helper to update balance ---
+  const updateBalance = (
+    assets: Asset[], 
+    liabilities: Liability[], 
+    id: string | undefined, 
+    type: 'asset' | 'liability' | undefined, 
+    amountChange: number // Positive adds value/debt, Negative subtracts
+  ) => {
+    if (!id || !type) return;
+
+    if (type === 'asset') {
+      const idx = assets.findIndex(a => a.id === id);
+      if (idx !== -1) {
+        assets[idx] = { ...assets[idx], value: assets[idx].value + amountChange };
+      }
+    } else if (type === 'liability') {
+      const idx = liabilities.findIndex(l => l.id === id);
+      if (idx !== -1) {
+        liabilities[idx] = { ...liabilities[idx], value: liabilities[idx].value + amountChange };
+      }
+    }
+  };
+
   // --- Core Logic: Process Recurring Transactions ---
   const processRecurringTransactions = (currentData: FinancialData): FinancialData => {
     const today = new Date();
-    // Set time to 0 to compare dates only
     today.setHours(0, 0, 0, 0);
 
     let newTransactions: Transaction[] = [];
@@ -66,9 +88,7 @@ function App() {
       let modified = false;
       let ruleClone = { ...rule };
 
-      // While next due date is today or in the past
       while (nextDue <= today) {
-        // Check remaining occurrences limit
         if (ruleClone.remainingOccurrences !== undefined && ruleClone.remainingOccurrences <= 0) {
            ruleClone.active = false;
            break; 
@@ -76,7 +96,6 @@ function App() {
 
         modified = true;
         
-        // Create the transaction
         const newTxn: Transaction = {
           id: generateId(),
           date: nextDue.toISOString().split('T')[0],
@@ -85,44 +104,53 @@ function App() {
           category: rule.category,
           note: `[自動扣款] ${rule.name} ${ruleClone.remainingOccurrences !== undefined ? `(剩餘 ${ruleClone.remainingOccurrences - 1} 期)` : ''}`,
           sourceId: rule.sourceId,
-          sourceType: rule.sourceType
+          sourceType: rule.sourceType,
+          destinationId: rule.destinationId,
+          destinationType: rule.destinationType
         };
         newTransactions.push(newTxn);
 
-        // Decrement occurrence if finite
         if (ruleClone.remainingOccurrences !== undefined) {
           ruleClone.remainingOccurrences -= 1;
-          // If we hit 0, deactivate immediately after this one is generated
           if (ruleClone.remainingOccurrences <= 0) {
              ruleClone.active = false;
           }
         }
 
-        // Apply asset/liability impact immediately
-        if (newTxn.sourceId) {
-          if (newTxn.sourceType === 'asset') {
-            const idx = updatedAssets.findIndex(a => a.id === newTxn.sourceId);
-            if (idx !== -1) {
-              updatedAssets[idx] = {
-                ...updatedAssets[idx],
-                value: updatedAssets[idx].value + (newTxn.type === 'income' ? newTxn.amount : -newTxn.amount)
-              };
-            }
-          } else if (newTxn.sourceType === 'liability') {
-            const idx = updatedLiabilities.findIndex(l => l.id === newTxn.sourceId);
-            if (idx !== -1) {
-               updatedLiabilities[idx] = {
-                ...updatedLiabilities[idx],
-                value: updatedLiabilities[idx].value + (newTxn.type === 'expense' ? newTxn.amount : -newTxn.amount)
-              };
-            }
-          }
+        // Apply Balance Impact for Recurring
+        if (newTxn.type === 'income') {
+          updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, newTxn.amount); // Income adds to asset/debt(rare)
+        } else if (newTxn.type === 'expense') {
+           // Expense: Asset decreases (-), Liability increases (+) (spending on credit)
+           // Wait, usually 'source' for expense is where money comes FROM.
+           // If Source is Asset (Cash): Value - amount.
+           // If Source is Liability (Credit Card): Value + amount (Debt goes up).
+           if (newTxn.sourceType === 'asset') {
+              updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, -newTxn.amount);
+           } else {
+              updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, newTxn.amount);
+           }
+        } else if (newTxn.type === 'transfer') {
+           // Transfer Logic: Source decreases (Asset-) or increases (Liab+), Dest increases (Asset+) or decreases (Liab-)
+           
+           // 1. Handle Source (Outgoing)
+           if (newTxn.sourceType === 'asset') {
+              updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, -newTxn.amount);
+           } else {
+              // Spending from Liability (Transfer from Credit Card to Cash?) -> Debt increases
+              updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, newTxn.amount);
+           }
+
+           // 2. Handle Destination (Incoming)
+           if (newTxn.destinationType === 'asset') {
+              updateBalance(updatedAssets, updatedLiabilities, newTxn.destinationId, newTxn.destinationType, newTxn.amount);
+           } else {
+              // Paying off Liability (Transfer to Credit Card) -> Debt decreases
+              updateBalance(updatedAssets, updatedLiabilities, newTxn.destinationId, newTxn.destinationType, -newTxn.amount);
+           }
         }
 
-        // Advance to next month
         nextDue.setMonth(nextDue.getMonth() + 1);
-        
-        // If deactivated, stop the loop
         if (!ruleClone.active) break;
       }
 
@@ -136,7 +164,7 @@ function App() {
     if (newTransactions.length > 0) {
       return {
         ...currentData,
-        transactions: [...newTransactions, ...currentData.transactions], // Add new ones to top
+        transactions: [...newTransactions, ...currentData.transactions],
         recurringTransactions: updatedRecurring,
         assets: updatedAssets,
         liabilities: updatedLiabilities
@@ -162,19 +190,39 @@ function App() {
     let newAssets = [...data.assets];
     let newLiabilities = [...data.liabilities];
 
-    if (t.sourceId) {
+    if (t.type === 'income') {
+      // Income increases value
       if (t.sourceType === 'asset') {
-        const assetIndex = newAssets.findIndex(a => a.id === t.sourceId);
-        if (assetIndex !== -1) {
-          if (t.type === 'income') newAssets[assetIndex].value += t.amount;
-          else newAssets[assetIndex].value -= t.amount;
-        }
-      } else if (t.sourceType === 'liability') {
-        const liabIndex = newLiabilities.findIndex(l => l.id === t.sourceId);
-        if (liabIndex !== -1) {
-          if (t.type === 'expense') newLiabilities[liabIndex].value += t.amount;
-          else newLiabilities[liabIndex].value -= t.amount;
-        }
+         updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+      } else {
+         // Income to liability (Refund?) -> Decreases debt usually? 
+         // Or if it's "Borrowing", debt increases. 
+         // Let's stick to previous logic: Income on Asset adds value. 
+         // For Liability, previous logic was `value -= amount`. Assuming Income means paying it off or refund.
+         updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+      }
+    } else if (t.type === 'expense') {
+      // Expense reduces Asset value OR Increases Liability (Debt)
+      if (t.sourceType === 'asset') {
+        updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+      } else {
+        updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+      }
+    } else if (t.type === 'transfer') {
+      // 1. Source Out
+      if (t.sourceType === 'asset') {
+        updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+      } else {
+        // Source is Liability (e.g. Cash Advance from CC) -> Debt Up
+        updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+      }
+
+      // 2. Destination In
+      if (t.destinationType === 'asset') {
+        updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, t.amount);
+      } else {
+        // Dest is Liability (e.g. Paying CC from Cash) -> Debt Down
+        updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, -t.amount);
       }
     }
 
@@ -193,20 +241,32 @@ function App() {
     let newAssets = [...data.assets];
     let newLiabilities = [...data.liabilities];
 
-    if (transaction.sourceId) {
-      if (transaction.sourceType === 'asset') {
-        const assetIndex = newAssets.findIndex(a => a.id === transaction.sourceId);
-        if (assetIndex !== -1) {
-          if (transaction.type === 'income') newAssets[assetIndex].value -= transaction.amount;
-          else newAssets[assetIndex].value += transaction.amount;
-        }
-      } else if (transaction.sourceType === 'liability') {
-        const liabIndex = newLiabilities.findIndex(l => l.id === transaction.sourceId);
-        if (liabIndex !== -1) {
-          if (transaction.type === 'expense') newLiabilities[liabIndex].value -= transaction.amount;
-          else newLiabilities[liabIndex].value += transaction.amount;
-        }
-      }
+    // Reverse the logic of Add
+    if (transaction.type === 'income') {
+       if (transaction.sourceType === 'asset') {
+          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
+       } else {
+          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
+       }
+    } else if (transaction.type === 'expense') {
+       if (transaction.sourceType === 'asset') {
+          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
+       } else {
+          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
+       }
+    } else if (transaction.type === 'transfer') {
+       // Reverse Source
+       if (transaction.sourceType === 'asset') {
+          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
+       } else {
+          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
+       }
+       // Reverse Dest
+       if (transaction.destinationType === 'asset') {
+          updateBalance(newAssets, newLiabilities, transaction.destinationId, transaction.destinationType, -transaction.amount);
+       } else {
+          updateBalance(newAssets, newLiabilities, transaction.destinationId, transaction.destinationType, transaction.amount);
+       }
     }
 
     setData(prev => ({ 

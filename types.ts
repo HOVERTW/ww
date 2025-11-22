@@ -1,5 +1,5 @@
 
-export type TransactionType = 'income' | 'expense';
+export type TransactionType = 'income' | 'expense' | 'transfer';
 
 export interface Transaction {
   id: string;
@@ -8,8 +8,14 @@ export interface Transaction {
   amount: number;
   category: string;
   note: string;
+  
+  // Source (From)
   sourceId?: string; // ID of the Asset or Liability
   sourceType?: 'asset' | 'liability';
+  
+  // Destination (To) - Only for transfers
+  destinationId?: string;
+  destinationType?: 'asset' | 'liability';
 }
 
 export interface RecurringTransaction {
@@ -18,8 +24,13 @@ export interface RecurringTransaction {
   amount: number;
   type: TransactionType;
   category: string;
+  
   sourceId?: string;
   sourceType?: 'asset' | 'liability';
+  
+  destinationId?: string;
+  destinationType?: 'asset' | 'liability';
+
   frequency: 'monthly'; // Currently support monthly
   dayOfMonth: number; // 1-31
   nextDueDate: string; // YYYY-MM-DD
@@ -28,19 +39,29 @@ export interface RecurringTransaction {
   remainingOccurrences?: number; // If defined, stops after 0. If undefined, runs forever.
 }
 
-export type AssetType = 'cash' | 'investment' | 'property' | 'crypto' | 'other';
+// Updated AssetType to distinguish markets
+export type AssetType = 'cash' | 'tw_stock' | 'us_stock' | 'crypto' | 'property' | 'investment' | 'other';
 export type LiabilityType = 'credit_card' | 'loan' | 'mortgage' | 'other';
 
 export interface Asset {
   id: string;
   name: string;
   type: AssetType;
-  value: number;
+  value: number; // Always in TWD (Base Currency)
+  
   // Investment specific fields
   symbol?: string;
   shares?: number;
-  purchasePrice?: number;
-  currentPrice?: number;
+  
+  // Price details
+  purchasePrice?: number; // In Original Currency (TWD, USD, etc.)
+  currentPrice?: number;  // In Original Currency
+  
+  // FX details (For US Stock / Crypto)
+  currency?: 'TWD' | 'USD' | 'USDT' | 'OTHER';
+  purchaseExchangeRate?: number; // e.g. 30.5 (at time of buy)
+  currentExchangeRate?: number;  // e.g. 32.1 (now)
+  
   lastUpdated?: string;
 }
 

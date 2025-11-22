@@ -10,7 +10,7 @@ import {
   Home, Gamepad2, Heart, GraduationCap, Users, FileText, TrendingDown, Shield, 
   Cat, Briefcase, Award, TrendingUp, PieChart, Clock, Building, Gift, RotateCcw, 
   MoreHorizontal, Smartphone, Plane, Wrench, Landmark, Baby, Edit3, RefreshCw, X, Check,
-  Repeat, History, Settings, Infinity
+  Repeat, History, Settings, Infinity, ArrowRightLeft, ArrowRight
 } from 'lucide-react';
 
 interface TransactionsProps {
@@ -63,6 +63,15 @@ const DEFAULT_INCOME_CATEGORIES = [
   { name: '其他', iconName: 'MoreHorizontal' },
 ];
 
+const DEFAULT_TRANSFER_CATEGORIES = [
+  { name: '轉帳', iconName: 'ArrowRightLeft' },
+  { name: '還款', iconName: 'CreditCard' },
+  { name: '投資入金', iconName: 'TrendingUp' },
+  { name: '儲蓄', iconName: 'PiggyBank' },
+  { name: '提款', iconName: 'Banknote' },
+  { name: '其他', iconName: 'MoreHorizontal' },
+];
+
 // Helper to safely get icon component
 const getIconComponent = (iconName: string) => {
   // @ts-ignore
@@ -88,7 +97,11 @@ export const Transactions: React.FC<TransactionsProps> = ({
   const [category, setCategory] = useState('');
   const [note, setNote] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // Source (From)
   const [sourceId, setSourceId] = useState('');
+  // Destination (To) - for Transfers
+  const [destinationId, setDestinationId] = useState('');
 
   // Recurring State in Form
   const [isRecurring, setIsRecurring] = useState(false);
@@ -106,12 +119,28 @@ export const Transactions: React.FC<TransactionsProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount || !category) return;
+    
+    if (type === 'transfer' && (!sourceId || !destinationId)) {
+      alert('轉帳必須選擇來源與目的帳戶');
+      return;
+    }
+    
+    if (type === 'transfer' && sourceId === destinationId) {
+      alert('來源與目的帳戶不能相同');
+      return;
+    }
 
     let sourceType: 'asset' | 'liability' | undefined = undefined;
+    let destinationType: 'asset' | 'liability' | undefined = undefined;
     
     if (sourceId) {
       if (assets.some(a => a.id === sourceId)) sourceType = 'asset';
       else if (liabilities.some(l => l.id === sourceId)) sourceType = 'liability';
+    }
+
+    if (destinationId) {
+      if (assets.some(a => a.id === destinationId)) destinationType = 'asset';
+      else if (liabilities.some(l => l.id === destinationId)) destinationType = 'liability';
     }
 
     if (isRecurring) {
@@ -120,19 +149,12 @@ export const Transactions: React.FC<TransactionsProps> = ({
        const today = new Date();
        const isDueTodayOrPast = selectedDate <= today;
 
-       // Determine remaining occurrences
-       // If limit is 'infinite', remaining is undefined
-       // If limit is 'fixed', start with the count
        let remaining = recurringLimit === 'fixed' ? recurringCount : undefined;
 
-       // If due today, we manually create the first one, so remaining for the RULE decreases by 1
        if (isDueTodayOrPast && remaining !== undefined) {
          remaining = remaining > 0 ? remaining - 1 : 0;
        }
 
-       // Calculate next due date for the rule
-       // If executed today manually, rule starts next month
-       // If future date, rule starts then
        let nextDue = date;
        if (isDueTodayOrPast) {
          const d = new Date(date);
@@ -148,6 +170,8 @@ export const Transactions: React.FC<TransactionsProps> = ({
           category,
           sourceId: sourceId || undefined,
           sourceType,
+          destinationId: destinationId || undefined,
+          destinationType,
           frequency: 'monthly',
           dayOfMonth,
           nextDueDate: nextDue, 
@@ -155,12 +179,10 @@ export const Transactions: React.FC<TransactionsProps> = ({
           remainingOccurrences: remaining
        };
 
-       // Only add rule if remaining > 0 or infinite
        if (remaining === undefined || remaining > 0) {
          onAddRecurringTransaction(recurring);
        }
 
-       // Immediate execution for today/past dates
        if (isDueTodayOrPast) {
          const newTransaction: Transaction = {
            id: generateId(),
@@ -170,7 +192,9 @@ export const Transactions: React.FC<TransactionsProps> = ({
            category,
            note: `[自動扣款首筆] ${note} ${recurringLimit === 'fixed' ? `(共 ${recurringCount} 期)` : ''}`,
            sourceId: sourceId || undefined,
-           sourceType
+           sourceType,
+           destinationId: destinationId || undefined,
+           destinationType
          };
          onAddTransaction(newTransaction);
        }
@@ -184,7 +208,9 @@ export const Transactions: React.FC<TransactionsProps> = ({
         category,
         note,
         sourceId: sourceId || undefined,
-        sourceType
+        sourceType,
+        destinationId: destinationId || undefined,
+        destinationType
       };
       onAddTransaction(newTransaction);
     }
@@ -193,6 +219,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
     setCategory(''); 
     setNote('');
     setSourceId('');
+    setDestinationId('');
     setIsRecurring(false);
     setRecurringLimit('infinite');
     setIsAdding(false);
@@ -241,7 +268,8 @@ export const Transactions: React.FC<TransactionsProps> = ({
     transactions.forEach(t => {
       if (!stats[t.date]) stats[t.date] = { income: 0, expense: 0 };
       if (t.type === 'income') stats[t.date].income += t.amount;
-      else stats[t.date].expense += t.amount;
+      else if (t.type === 'expense') stats[t.date].expense += t.amount;
+      // Transfer doesn't show on daily income/expense summary calendar to avoid noise
     });
     return stats;
   }, [transactions]);
@@ -330,12 +358,37 @@ export const Transactions: React.FC<TransactionsProps> = ({
 
   // Merge defaults with customs
   const currentCategories = useMemo(() => {
-    const defaults = type === 'income' ? DEFAULT_INCOME_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES;
+    let defaults;
+    if (type === 'income') defaults = DEFAULT_INCOME_CATEGORIES;
+    else if (type === 'expense') defaults = DEFAULT_EXPENSE_CATEGORIES;
+    else defaults = DEFAULT_TRANSFER_CATEGORIES;
+
     const customs = customCategories
       .filter(c => c.type === type)
       .map(c => ({ name: c.name, iconName: c.iconName }));
     return [...defaults, ...customs];
   }, [type, customCategories]);
+
+  // Group options for selects
+  const renderAccountOptions = (excludeId?: string) => (
+    <>
+      <option value="">請選擇帳戶</option>
+      {assets.length > 0 && (
+        <optgroup label="資產 (Assets)">
+          {assets.filter(a => a.id !== excludeId).map(a => (
+            <option key={a.id} value={a.id}>{a.name} (${a.value.toLocaleString()})</option>
+          ))}
+        </optgroup>
+      )}
+      {liabilities.length > 0 && (
+        <optgroup label="負債 (Liabilities)">
+          {liabilities.filter(l => l.id !== excludeId).map(l => (
+            <option key={l.id} value={l.id}>{l.name} (${l.value.toLocaleString()})</option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
 
   return (
     <div className="space-y-8">
@@ -425,16 +478,23 @@ export const Transactions: React.FC<TransactionsProps> = ({
                     <button
                       type="button"
                       onClick={() => { setType('income'); setCategory(''); }}
-                      className={`flex-1 py-1.5 text-sm rounded-md font-medium transition-all ${type === 'income' ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'text-slate-400 hover:text-slate-200'}`}
+                      className={`flex-1 py-1.5 text-xs sm:text-sm rounded-md font-medium transition-all ${type === 'income' ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'text-slate-400 hover:text-slate-200'}`}
                     >
-                      收入 (Income)
+                      收入
                     </button>
                     <button
                       type="button"
                       onClick={() => { setType('expense'); setCategory(''); }}
-                      className={`flex-1 py-1.5 text-sm rounded-md font-medium transition-all ${type === 'expense' ? 'bg-rose-600 text-white shadow-[0_0_10px_rgba(225,29,72,0.5)]' : 'text-slate-400 hover:text-slate-200'}`}
+                      className={`flex-1 py-1.5 text-xs sm:text-sm rounded-md font-medium transition-all ${type === 'expense' ? 'bg-rose-600 text-white shadow-[0_0_10px_rgba(225,29,72,0.5)]' : 'text-slate-400 hover:text-slate-200'}`}
                     >
-                      支出 (Expense)
+                      支出
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setType('transfer'); setCategory(''); }}
+                      className={`flex-1 py-1.5 text-xs sm:text-sm rounded-md font-medium transition-all ${type === 'transfer' ? 'bg-slate-500 text-white shadow-[0_0_10px_rgba(148,163,184,0.5)]' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      轉帳/還款
                     </button>
                   </div>
                 </div>
@@ -500,43 +560,52 @@ export const Transactions: React.FC<TransactionsProps> = ({
                         );
                       })}
                   </div>
-
-                  <input
-                      type="text"
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      placeholder="或輸入自定義類別..."
-                      className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm placeholder:text-slate-600"
-                      required
-                  />
                 </div>
 
-                <div>
-                    <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">SOURCE (資金來源/去向)</label>
-                    <select
-                      value={sourceId}
-                      onChange={(e) => setSourceId(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm"
-                    >
-                      <option value="">不指定 (僅記錄)</option>
-                      {assets.length > 0 && (
-                        <optgroup label="資產 (Assets)">
-                          {assets.map(a => (
-                            <option key={a.id} value={a.id}>{a.name} (${a.value.toLocaleString()})</option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {liabilities.length > 0 && (
-                        <optgroup label="負債 (Liabilities)">
-                          {liabilities.map(l => (
-                            <option key={l.id} value={l.id}>{l.name} (${l.value.toLocaleString()})</option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                </div>
+                {/* Source / Destination Logic */}
+                {type === 'transfer' ? (
+                  <>
+                    <div>
+                        <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">FROM (來源帳戶)</label>
+                        <select
+                          value={sourceId}
+                          onChange={(e) => setSourceId(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm"
+                          required
+                        >
+                          {renderAccountOptions(destinationId)}
+                        </select>
+                    </div>
+                    <div className="flex items-center justify-center pt-6 text-slate-500">
+                        <ArrowRight size={24} className="text-cyan-500 animate-pulse" />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">TO (轉入/還款帳戶)</label>
+                        <select
+                          value={destinationId}
+                          onChange={(e) => setDestinationId(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm"
+                          required
+                        >
+                          {renderAccountOptions(sourceId)}
+                        </select>
+                    </div>
+                  </>
+                ) : (
+                  <div className="md:col-span-1 lg:col-span-2">
+                      <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">ACCOUNT (帳戶)</label>
+                      <select
+                        value={sourceId}
+                        onChange={(e) => setSourceId(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm"
+                      >
+                        <option value="">不指定 (僅記錄)</option>
+                        {renderAccountOptions()}
+                      </select>
+                  </div>
+                )}
 
-                <div className="md:col-span-1 lg:col-span-2">
+                <div className={type === 'transfer' ? "md:col-span-2 lg:col-span-3" : "md:col-span-1 lg:col-span-1"}>
                   <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">NOTE (備註 - 選填)</label>
                   <input
                       type="text"
@@ -556,7 +625,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
                           <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${isRecurring ? 'translate-x-4' : 'translate-x-0'}`}></div>
                         </div>
                         <span className={`text-sm font-medium transition-colors ${isRecurring ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`}>
-                          {isRecurring ? `固定每月 ${new Date(date).getDate()} 日扣款` : '設為固定週期 (如: 信貸/房租)'}
+                          {isRecurring ? `固定每月 ${new Date(date).getDate()} 日執行` : '設為固定週期'}
                         </span>
                         <input type="checkbox" className="hidden" checked={isRecurring} onChange={() => setIsRecurring(!isRecurring)} />
                       </label>
@@ -671,7 +740,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
                   <tr>
                     <th className="px-6 py-4">日期</th>
                     <th className="px-6 py-4">類別</th>
-                    <th className="px-6 py-4">來源/去向</th>
+                    <th className="px-6 py-4">資金流向</th>
                     <th className="px-6 py-4">備註</th>
                     <th className="px-6 py-4 text-right">金額</th>
                     <th className="px-6 py-4 text-center">操作</th>
@@ -682,22 +751,36 @@ export const Transactions: React.FC<TransactionsProps> = ({
                     <tr key={t.id} className="hover:bg-slate-800/50 transition-colors group">
                       <td className="px-6 py-4 whitespace-nowrap text-slate-400 font-mono">{t.date}</td>
                       <td className="px-6 py-4 font-medium text-slate-200 flex items-center gap-2">
-                        {t.type === 'income' ? 
-                          <ArrowUpCircle size={16} className="text-emerald-500" /> : 
-                          <ArrowDownCircle size={16} className="text-rose-500" />
-                        }
+                        {t.type === 'income' && <ArrowUpCircle size={16} className="text-emerald-500" />}
+                        {t.type === 'expense' && <ArrowDownCircle size={16} className="text-rose-500" />}
+                        {t.type === 'transfer' && <ArrowRightLeft size={16} className="text-slate-400" />}
                         {t.category}
                       </td>
                       <td className="px-6 py-4 text-slate-400 font-mono text-xs">
-                        {t.sourceId ? (
-                          <span className="flex items-center gap-1 px-2 py-1 bg-slate-800 rounded border border-slate-700">
-                              <CreditCard size={12} /> {getSourceName(t.sourceId, t.sourceType)}
-                          </span>
-                        ) : <span className="opacity-30">-</span>}
+                         {t.type === 'transfer' ? (
+                           <div className="flex items-center gap-2">
+                              <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700 truncate max-w-[80px]">
+                                {getSourceName(t.sourceId, t.sourceType)}
+                              </span>
+                              <ArrowRight size={12} className="text-cyan-500" />
+                              <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700 truncate max-w-[80px]">
+                                {getSourceName(t.destinationId, t.destinationType)}
+                              </span>
+                           </div>
+                         ) : (
+                           t.sourceId ? (
+                             <span className="flex items-center gap-1 px-2 py-1 bg-slate-800 rounded border border-slate-700 w-fit">
+                                 <CreditCard size={12} /> {getSourceName(t.sourceId, t.sourceType)}
+                             </span>
+                           ) : <span className="opacity-30">-</span>
+                         )}
                       </td>
                       <td className="px-6 py-4 text-slate-500">{t.note}</td>
-                      <td className={`px-6 py-4 text-right font-semibold font-mono tracking-wide ${t.type === 'income' ? 'text-emerald-400' : 'text-slate-200'}`}>
-                        {t.type === 'expense' && '-'}${t.amount.toLocaleString()}
+                      <td className={`px-6 py-4 text-right font-semibold font-mono tracking-wide ${
+                        t.type === 'income' ? 'text-emerald-400' : 
+                        t.type === 'expense' ? 'text-slate-200' : 'text-slate-400'
+                      }`}>
+                        {t.type === 'expense' && '-'}{t.type === 'transfer' && ''}{t.amount.toLocaleString()}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button 
@@ -727,7 +810,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
            <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-xl border border-slate-700 shadow-lg">
               <h3 className="text-lg font-bold text-cyan-400 mb-2 font-mono">RECURRING RULES</h3>
               <p className="text-sm text-slate-500 mb-6">
-                 這裡列出您設定的所有自動化週期性交易（如信貸、房租）。系統會在每次開啟時檢查並自動補上到期的交易。
+                 這裡列出您設定的所有自動化週期性交易（如信貸、房租、固定轉帳）。系統會在每次開啟時檢查並自動補上到期的交易。
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -736,7 +819,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
                        {!rule.active && <div className="absolute top-2 right-10 text-[10px] bg-slate-700 text-slate-400 px-1 rounded font-mono">INACTIVE</div>}
                        <div className="flex justify-between items-start mb-2">
                           <div className="flex items-center gap-2">
-                             <div className={`p-2 rounded-lg ${rule.type === 'income' ? 'bg-emerald-900/20 text-emerald-400' : 'bg-rose-900/20 text-rose-400'}`}>
+                             <div className={`p-2 rounded-lg ${rule.type === 'income' ? 'bg-emerald-900/20 text-emerald-400' : (rule.type === 'transfer' ? 'bg-slate-700/50 text-slate-300' : 'bg-rose-900/20 text-rose-400')}`}>
                                 <Repeat size={18} />
                              </div>
                              <div>
@@ -758,12 +841,23 @@ export const Transactions: React.FC<TransactionsProps> = ({
                              ${rule.amount.toLocaleString()}
                           </span>
                        </div>
-                       <div className="flex items-center justify-between text-sm mt-1">
-                          <span className="text-slate-400">連結帳戶</span>
-                          <span className="text-slate-300 text-xs bg-slate-900 px-2 py-0.5 rounded">
-                             {getSourceName(rule.sourceId, rule.sourceType)}
-                          </span>
-                       </div>
+                       {rule.type === 'transfer' ? (
+                         <div className="flex items-center justify-between text-sm mt-1">
+                            <span className="text-slate-400">轉帳路徑</span>
+                            <div className="flex items-center gap-1 text-xs">
+                              <span className="text-slate-300 bg-slate-900 px-2 py-0.5 rounded">{getSourceName(rule.sourceId, rule.sourceType)}</span>
+                              <ArrowRight size={10} className="text-cyan-500" />
+                              <span className="text-slate-300 bg-slate-900 px-2 py-0.5 rounded">{getSourceName(rule.destinationId, rule.destinationType)}</span>
+                            </div>
+                         </div>
+                       ) : (
+                         <div className="flex items-center justify-between text-sm mt-1">
+                            <span className="text-slate-400">連結帳戶</span>
+                            <span className="text-slate-300 text-xs bg-slate-900 px-2 py-0.5 rounded">
+                               {getSourceName(rule.sourceId, rule.sourceType)}
+                            </span>
+                         </div>
+                       )}
                        
                        {rule.active ? (
                          <>
@@ -834,6 +928,10 @@ export const Transactions: React.FC<TransactionsProps> = ({
                      onClick={() => setNewCatType('income')}
                      className={`flex-1 py-1.5 text-xs rounded font-medium ${newCatType === 'income' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
                    >收入</button>
+                   <button 
+                     onClick={() => setNewCatType('transfer')}
+                     className={`flex-1 py-1.5 text-xs rounded font-medium ${newCatType === 'transfer' ? 'bg-slate-500 text-white' : 'text-slate-400'}`}
+                   >轉帳</button>
                  </div>
                </div>
 
