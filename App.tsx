@@ -6,7 +6,7 @@ import { Dashboard } from './components/Dashboard';
 import { Transactions } from './components/Transactions';
 import { BalanceSheet } from './components/BalanceSheet';
 import { AIAdvisor } from './components/AIAdvisor';
-import { LayoutDashboard, List, Scale, Sparkles, Download } from 'lucide-react';
+import { LayoutDashboard, List, Scale, Sparkles, Download, AlertTriangle, Share, Menu, X } from 'lucide-react';
 
 function App() {
   const [data, setData] = useState<FinancialData>({ 
@@ -22,6 +22,9 @@ function App() {
   // PWA Install Prompt State
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
+  
+  // Mobile Warning State
+  const [showPwaWarning, setShowPwaWarning] = useState(false);
 
   useEffect(() => {
     const storedData = loadData();
@@ -41,6 +44,16 @@ function App() {
       setDeferredPrompt(e);
       setShowInstallBtn(true);
     });
+
+    // Check if Mobile & Not Standalone
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+
+    if (isMobile && !isStandalone) {
+      // Delay slightly for dramatic effect or to ensure load
+      setTimeout(() => setShowPwaWarning(true), 1000);
+    }
+
   }, []);
 
   useEffect(() => {
@@ -122,9 +135,6 @@ function App() {
           updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, newTxn.amount); // Income adds to asset/debt(rare)
         } else if (newTxn.type === 'expense') {
            // Expense: Asset decreases (-), Liability increases (+) (spending on credit)
-           // Wait, usually 'source' for expense is where money comes FROM.
-           // If Source is Asset (Cash): Value - amount.
-           // If Source is Liability (Credit Card): Value + amount (Debt goes up).
            if (newTxn.sourceType === 'asset') {
               updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, -newTxn.amount);
            } else {
@@ -195,10 +205,6 @@ function App() {
       if (t.sourceType === 'asset') {
          updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
       } else {
-         // Income to liability (Refund?) -> Decreases debt usually? 
-         // Or if it's "Borrowing", debt increases. 
-         // Let's stick to previous logic: Income on Asset adds value. 
-         // For Liability, previous logic was `value -= amount`. Assuming Income means paying it off or refund.
          updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
       }
     } else if (t.type === 'expense') {
@@ -333,8 +339,35 @@ function App() {
     { id: AppView.ADVISOR, label: 'AI 智能顧問', icon: <Sparkles size={20} /> },
   ];
 
+  // --- Components ---
+  
+  // Cyberpunk WW Logo Component
+  const CyberpunkLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
+    <div className={`${className} relative bg-slate-900 rounded-lg border border-slate-700 flex items-center justify-center overflow-hidden shadow-[0_0_15px_rgba(6,182,212,0.3)] group`}>
+       <div className="absolute inset-0 bg-cyan-900/20 group-hover:bg-cyan-500/10 transition-colors"></div>
+       {/* Glitch Layer 1 (Cyan) */}
+       <div className="absolute inset-0 flex items-center justify-center translate-x-[-1px] translate-y-0 opacity-80">
+          <span className="font-mono font-black text-xl sm:text-2xl text-cyan-400 tracking-tighter flex leading-none">
+            <span>W</span><span className="-ml-1">W</span>
+          </span>
+       </div>
+       {/* Glitch Layer 2 (Magenta) */}
+       <div className="absolute inset-0 flex items-center justify-center translate-x-[1px] translate-y-[1px] opacity-80 mix-blend-screen">
+          <span className="font-mono font-black text-xl sm:text-2xl text-fuchsia-500 tracking-tighter flex leading-none">
+            <span>W</span><span className="-ml-1">W</span>
+          </span>
+       </div>
+       {/* Main Layer (White) */}
+       <div className="relative z-10 flex items-center justify-center mix-blend-overlay">
+          <span className="font-mono font-black text-xl sm:text-2xl text-white tracking-tighter flex leading-none">
+            <span>W</span><span className="-ml-1">W</span>
+          </span>
+       </div>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20 md:pb-0 md:pl-64 selection:bg-cyan-500/30">
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20 md:pb-0 md:pl-64 selection:bg-cyan-500/30 relative">
       
       {/* Background effects */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
@@ -342,13 +375,58 @@ function App() {
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-cyan-900/10 rounded-full blur-[120px]"></div>
       </div>
 
+      {/* Mobile PWA Install Warning Modal */}
+      {showPwaWarning && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/90 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 w-full sm:max-w-md border-t sm:border border-rose-500/50 sm:rounded-2xl shadow-[0_0_50px_rgba(244,63,94,0.3)] p-6 relative overflow-hidden">
+             {/* Scanning Line Effect */}
+             <div className="absolute top-0 left-0 w-full h-1 bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)] animate-scan-line"></div>
+             <div className="absolute top-0 right-0 p-4 text-[10px] text-rose-900 font-tech font-bold">SECURITY_PROTOCOL_OVERRIDE</div>
+
+             <div className="flex items-start gap-4 mb-4">
+                <div className="p-3 bg-rose-900/20 border border-rose-500/50 rounded-lg text-rose-500 animate-pulse">
+                   <AlertTriangle size={32} />
+                </div>
+                <div>
+                   <h3 className="text-xl font-bold text-rose-500 font-mono tracking-wide">SYSTEM NOTICE</h3>
+                   <p className="text-xs text-rose-300/80 font-mono mt-1">UNSECURE_ENV_DETECTED</p>
+                </div>
+             </div>
+
+             <div className="space-y-4 text-slate-300 text-sm">
+                <p>
+                   偵測到您正在使用手機瀏覽器開啟。為了防止資料因瀏覽器清除快取而遺失，<span className="text-cyan-400 font-bold">請務必將此應用程式加入主畫面</span>。
+                </p>
+                
+                <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                   <p className="text-xs text-slate-400 mb-2 font-mono uppercase">Install Instructions:</p>
+                   <ol className="list-decimal list-inside space-y-2 text-slate-200">
+                      <li className="flex items-center gap-2">
+                         點擊瀏覽器選單 <span className="text-slate-500 text-xs">(分享 <Share size={12} className="inline"/> 或選單 <Menu size={12} className="inline"/>)</span>
+                      </li>
+                      <li>選擇 <span className="text-cyan-400 font-bold">「加入主畫面」</span> (Add to Home Screen)</li>
+                      <li>從主畫面開啟 <span className="font-bold font-mono">WW</span> 圖示開始使用</li>
+                   </ol>
+                </div>
+             </div>
+
+             <div className="mt-6 flex gap-3">
+                <button 
+                  onClick={() => setShowPwaWarning(false)}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl font-mono text-xs border border-slate-700 transition-colors"
+                >
+                   暫時忽略 (資料不安全)
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar (Desktop) */}
       <aside className="fixed left-0 top-0 h-full w-64 bg-slate-900/90 backdrop-blur-xl border-r border-slate-800 hidden md:flex flex-col z-20">
         <div className="p-6 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-tr from-cyan-600 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-[0_0_15px_rgba(6,182,212,0.5)] font-mono text-xl">
-              W
-            </div>
+            <CyberpunkLogo />
             <h1 className="text-xl font-bold text-slate-100 tracking-wider font-mono">WealthWise<span className="text-cyan-500">.AI</span></h1>
           </div>
         </div>
@@ -392,7 +470,7 @@ function App() {
       {/* Header (Mobile) */}
       <header className="md:hidden bg-slate-900/90 backdrop-blur-md border-b border-slate-800 p-4 sticky top-0 z-30 flex items-center justify-between">
          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-tr from-cyan-600 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-lg">W</div>
+            <CyberpunkLogo className="w-9 h-9" />
             <h1 className="text-lg font-bold text-slate-100 font-mono">WealthWise<span className="text-cyan-500">.AI</span></h1>
          </div>
          {showInstallBtn && (

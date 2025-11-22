@@ -8,14 +8,14 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/3448/3448620.png",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBzdHlsZT0iYmFja2dyb3VuZC1jb2xvcjojMDIwNjE3Ij4KICA8cGF0aCBkPSJNNjAgMTAwIEwxMzAgNDAwIEwyMDAgMTAwIEwyNzAgNDAwIEwzNDAgMTAwIiBzdHJva2U9IiMyMmQzZWUiIHN0cm9rZS13aWR0aD0iNDAiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDxwYXRoIGQ9Ik0xNzIgMTAwIEwyNDIgNDAwIEwzMTIgMTAwIEwzODIgNDAwIEw0NTIgMTAwIiBzdHJva2U9IiNlODc5ZjkiIHN0cm9rZS13aWR0aD0iNDAiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgc3R5bGU9Im1peC1ibGVuZC1tb2RlOnNjcmVlbiIvPgo8L3N2Zz4=",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/svg+xml"
     },
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/3448/3448620.png",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBzdHlsZT0iYmFja2dyb3VuZC1jb2xvcjojMDIwNjE3Ij4KICA8cGF0aCBkPSJNNjAgMTAwIEwxMzAgNDAwIEwyMDAgMTAwIEwyNzAgNDAwIEwzNDAgMTAwIiBzdHJva2U9IiMyMmQzZWUiIHN0cm9rZS13aWR0aD0iNDAiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDxwYXRoIGQ9Ik0xNzIgMTAwIEwyNDIgNDAwIEwzMTIgMTAwIEwzODIgNDAwIEw0NTIgMTAwIiBzdHJva2U9IiNlODc5ZjkiIHN0cm9rZS13aWR0aD0iNDAiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgc3R5bGU9Im1peC1ibGVuZC1tb2RlOnNjcmVlbiIvPgo8L3N2Zz4=",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/svg+xml"
     }
   ]
 }
