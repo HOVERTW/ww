@@ -45,12 +45,15 @@ function App() {
       setShowInstallBtn(true);
     });
 
-    // Check if Mobile & Not Standalone
+    // --- Native App Detection ---
+    // Check if running in Capacitor (Native iOS Shell) or Standalone PWA
+    // Capacitor injects window.Capacitor
+    const isCapacitor = (window as any).Capacitor !== undefined;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone || isCapacitor;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
 
-    if (isMobile && !isStandalone) {
-      // Delay slightly for dramatic effect or to ensure load
+    // Only show warning if: Mobile + NOT Standalone + NOT Native App
+    if (isMobile && !isStandalone && !isCapacitor) {
       setTimeout(() => setShowPwaWarning(true), 1000);
     }
 
@@ -367,7 +370,7 @@ function App() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-32 md:pb-0 md:pl-64 selection:bg-cyan-500/30 relative">
+    <div className="h-full bg-slate-950 text-slate-200 font-sans md:pl-64 selection:bg-cyan-500/30 relative flex flex-col">
       
       {/* Background effects */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
@@ -378,7 +381,7 @@ function App() {
       {/* Mobile PWA Install Warning Modal */}
       {showPwaWarning && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/90 backdrop-blur-md animate-fade-in">
-          <div className="bg-slate-900 w-full sm:max-w-md border-t sm:border border-rose-500/50 sm:rounded-2xl shadow-[0_0_50px_rgba(244,63,94,0.3)] p-6 relative overflow-hidden">
+          <div className="bg-slate-900 w-full sm:max-w-md border-t sm:border border-rose-500/50 sm:rounded-2xl shadow-[0_0_50px_rgba(244,63,94,0.3)] p-6 relative overflow-hidden mb-safe sm:mb-0">
              {/* Scanning Line Effect */}
              <div className="absolute top-0 left-0 w-full h-1 bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)] animate-scan-line"></div>
              <div className="absolute top-0 right-0 p-4 text-[10px] text-rose-900 font-tech font-bold">SECURITY_PROTOCOL_OVERRIDE</div>
@@ -468,7 +471,7 @@ function App() {
       </aside>
 
       {/* Header (Mobile) */}
-      <header className="md:hidden bg-slate-900/90 backdrop-blur-md border-b border-slate-800 p-4 sticky top-0 z-30 flex items-center justify-between shadow-lg">
+      <header className="md:hidden bg-slate-900/90 backdrop-blur-md border-b border-slate-800 p-4 sticky top-0 z-30 flex items-center justify-between shadow-lg pt-safe">
          <div className="flex items-center gap-2">
             <CyberpunkLogo className="w-9 h-9" />
             <h1 className="text-lg font-bold text-slate-100 font-mono">WealthWise<span className="text-cyan-500">.AI</span></h1>
@@ -483,26 +486,8 @@ function App() {
          )}
       </header>
 
-      {/* Bottom Navigation (Mobile) */}
-      <nav className="md:hidden fixed bottom-0 left-0 w-full bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-30 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.5)]">
-        <div className="flex justify-around p-2">
-          {navItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setView(item.id)}
-              className={`flex flex-col items-center p-2 rounded-xl transition-colors flex-1 ${
-                view === item.id ? 'text-cyan-400' : 'text-slate-600'
-              }`}
-            >
-              {item.icon}
-              <span className="text-[10px] font-medium mt-1">{item.label}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="max-w-5xl mx-auto p-4 md:p-8 pt-6 relative z-10">
+      {/* Main Content (Scrollable Area) */}
+      <main className="flex-1 overflow-y-auto max-w-5xl w-full mx-auto p-4 md:p-8 pt-6 pb-24 md:pb-8 relative z-10 scrollbar-none">
         <header className="mb-8 hidden md:block border-b border-slate-800 pb-4">
           <h2 className="text-3xl font-bold text-slate-100 tracking-tight font-mono">
              <span className="text-cyan-500 mr-2">&gt;</span> 
@@ -541,6 +526,24 @@ function App() {
 
         {view === AppView.ADVISOR && <AIAdvisor data={data} />}
       </main>
+
+      {/* Bottom Navigation (Mobile) - Fixed at bottom */}
+      <nav className="md:hidden flex-none bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-30 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.5)]">
+        <div className="flex justify-around p-2">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => setView(item.id)}
+              className={`flex flex-col items-center p-2 rounded-xl transition-colors flex-1 ${
+                view === item.id ? 'text-cyan-400' : 'text-slate-600'
+              }`}
+            >
+              {item.icon}
+              <span className="text-[10px] font-medium mt-1">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

@@ -174,7 +174,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-slate-900/95 border border-cyan-500/50 p-3 rounded-lg shadow-[0_0_15px_rgba(6,182,212,0.3)] backdrop-blur-xl">
+        <div className="bg-slate-900/95 border border-cyan-500/50 p-3 rounded-lg shadow-[0_0_15px_rgba(6,182,212,0.3)] backdrop-blur-xl z-50">
           <p className="text-slate-400 text-xs font-mono mb-1 border-b border-slate-800 pb-1">{label || payload[0].name}</p>
           <p className="text-cyan-400 text-sm font-mono font-bold flex items-center gap-2">
              <span className="w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_5px_rgba(34,211,238,0.8)]"></span>
@@ -264,7 +264,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
           
           <div className="flex-1 w-full">
              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={netWorthHistory} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                <AreaChart data={netWorthHistory} margin={{ top: 10, right: 10, left: -20, bottom: 45 }}>
                   <defs>
                     <linearGradient id="colorNetWorth" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.4}/>
@@ -276,7 +276,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
                     dataKey="formattedDate" 
                     axisLine={false} 
                     tickLine={false} 
-                    tick={{fill: '#64748b', fontSize: 10, fontFamily: 'Share Tech Mono'}} 
+                    tick={{fill: '#64748b', fontSize: 10, fontFamily: 'Share Tech Mono', dy: 10}} 
                     minTickGap={30}
                     tickMargin={10}
                   />

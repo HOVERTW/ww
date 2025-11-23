@@ -79,6 +79,13 @@ const getIconComponent = (iconName: string) => {
   return Icon;
 };
 
+// Helper for compact number formatting
+const formatCompactAmount = (num: number) => {
+  if (num < 10000) return num.toLocaleString(); // 9999
+  if (num < 1000000) return `${(num / 10000).toFixed(1)}萬`; // 1.1萬
+  return `${(num / 1000000).toFixed(1)}M`; // 10.1M
+};
+
 export const Transactions: React.FC<TransactionsProps> = ({ 
   transactions, assets, liabilities, customCategories, recurringTransactions,
   onAddTransaction, onDeleteTransaction, onAddCustomCategory,
@@ -263,13 +270,22 @@ export const Transactions: React.FC<TransactionsProps> = ({
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   };
 
+  // Group transactions by date for the calendar
+  const transactionsByDate = useMemo(() => {
+    const map: Record<string, Transaction[]> = {};
+    transactions.forEach(t => {
+      if (!map[t.date]) map[t.date] = [];
+      map[t.date].push(t);
+    });
+    return map;
+  }, [transactions]);
+
   const dailyStats = useMemo(() => {
     const stats: Record<string, { income: number; expense: number }> = {};
     transactions.forEach(t => {
       if (!stats[t.date]) stats[t.date] = { income: 0, expense: 0 };
       if (t.type === 'income') stats[t.date].income += t.amount;
       else if (t.type === 'expense') stats[t.date].expense += t.amount;
-      // Transfer doesn't show on daily income/expense summary calendar to avoid noise
     });
     return stats;
   }, [transactions]);
@@ -288,12 +304,13 @@ export const Transactions: React.FC<TransactionsProps> = ({
     const month = currentDate.getMonth();
 
     for (let i = 0; i < firstDayOfMonth; i++) {
-      days.push(<div key={`empty-${i}`} className="h-24 bg-slate-900/30 border border-slate-800/50"></div>);
+      days.push(<div key={`empty-${i}`} className="min-h-[100px] h-32 bg-slate-900/30 border border-slate-800/50"></div>);
     }
 
     for (let d = 1; d <= daysInMonth; d++) {
       const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const stat = dailyStats[dateString];
+      const dailyTransactions = transactionsByDate[dateString] || [];
       const isToday = new Date().toISOString().split('T')[0] === dateString;
       const isSelected = date === dateString;
 
@@ -304,33 +321,59 @@ export const Transactions: React.FC<TransactionsProps> = ({
             setDate(dateString);
             if(!isAdding) setIsAdding(true);
           }}
-          className={`h-24 border p-1 relative group cursor-pointer transition-all overflow-hidden
+          className={`min-h-[100px] h-32 border p-1 relative group cursor-pointer transition-all overflow-hidden flex flex-col
             ${isSelected 
               ? 'border-cyan-500 bg-cyan-900/10 shadow-[inset_0_0_10px_rgba(6,182,212,0.2)]' 
               : 'border-slate-800 hover:border-slate-600 hover:bg-slate-800/50'}
             ${isToday ? 'bg-slate-800' : 'bg-slate-900/60'}
           `}
         >
-          <div className={`text-xs font-mono mb-1 flex justify-between items-start`}>
+          {/* Header: Date */}
+          <div className={`text-xs font-mono mb-1 flex justify-between items-start flex-shrink-0`}>
              <span className={`${isToday ? 'text-cyan-400 font-bold' : 'text-slate-500'} ${isSelected ? 'text-cyan-300' : ''}`}>
                 {d}
              </span>
              {isToday && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></span>}
           </div>
-          
-          <div className="flex flex-col gap-0.5 justify-end h-[calc(100%-20px)]">
-            {stat?.income ? (
-              <div className="text-[10px] sm:text-xs font-mono text-emerald-400 truncate bg-emerald-900/20 px-1 rounded border border-emerald-500/20 flex items-center justify-between">
-                <span>+</span>${stat.income.toLocaleString()}
-              </div>
-            ) : null}
-            
-            {stat?.expense ? (
-              <div className="text-[10px] sm:text-xs font-mono text-rose-400 truncate bg-rose-900/20 px-1 rounded border border-rose-500/20 flex items-center justify-between">
-                <span>-</span>${stat.expense.toLocaleString()}
-              </div>
-            ) : null}
+
+          {/* Scrollable Transaction Items */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-w-1 scrollbar-thumb-slate-700 space-y-0.5 mb-1">
+             {dailyTransactions.map(t => (
+               <div key={t.id} className="flex justify-between items-center text-[10px] sm:text-[11px] font-mono leading-tight px-0.5 hover:bg-white/5 rounded">
+                 <span className={`truncate max-w-[55%] ${
+                    t.type === 'income' ? 'text-emerald-300' : 
+                    t.type === 'expense' ? 'text-rose-300' : 'text-slate-400'
+                 }`}>
+                   {t.category}
+                 </span>
+                 <span className={`${
+                    t.type === 'income' ? 'text-emerald-400' : 
+                    t.type === 'expense' ? 'text-rose-400' : 'text-slate-400'
+                 }`}>
+                   {formatCompactAmount(t.amount)}
+                 </span>
+               </div>
+             ))}
           </div>
+          
+          {/* Daily Total Summary (Footer) */}
+          {(stat?.income || stat?.expense) && (
+            <div className="flex flex-col gap-0.5 border-t border-slate-700/50 pt-1 mt-auto flex-shrink-0">
+              {stat?.income > 0 && (
+                <div className="text-[9px] font-mono text-emerald-500 flex justify-between items-center">
+                  <span>收</span>
+                  <span>+{formatCompactAmount(stat.income)}</span>
+                </div>
+              )}
+              {stat?.expense > 0 && (
+                <div className="text-[9px] font-mono text-rose-500 flex justify-between items-center">
+                  <span>支</span>
+                  <span>-{formatCompactAmount(stat.expense)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity"></div>
         </div>
       );
