@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Asset, Liability, AssetType, LiabilityType } from '../types';
 import { generateId } from '../services/storageService';
 import { getStockPrice, getExchangeRate } from '../services/geminiService';
-import { Plus, Trash2, Building2, Briefcase, Wallet, CreditCard, DollarSign, Edit2, RefreshCw, TrendingUp, TrendingDown, Search, Globe, Bitcoin, LineChart, Zap } from 'lucide-react';
+import { Plus, Trash2, Building2, Briefcase, Wallet, CreditCard, DollarSign, Edit2, RefreshCw, TrendingUp, TrendingDown, Search, Globe, Bitcoin, LineChart, Zap, Shield } from 'lucide-react';
 
 interface BalanceSheetProps {
   assets: Asset[];
@@ -229,6 +229,7 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
       case 'us_stock': return <Globe size={18} />;
       case 'crypto': return <Bitcoin size={18} />;
       case 'investment': return <Briefcase size={18} />;
+      case 'insurance': return <Shield size={18} />;
       case 'cash': return <Wallet size={18} />;
       default: return <DollarSign size={18} />;
     }
@@ -241,6 +242,7 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
           case 'us_stock': return '美股';
           case 'crypto': return '加密貨幣';
           case 'investment': return '其他投資';
+          case 'insurance': return '保險';
           case 'property': return '不動產';
           case 'other': return '其他';
           default: return type;
@@ -254,6 +256,7 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
           case 'us_stock': return '例如：Firstrade 帳戶、NVDA 持倉...';
           case 'crypto': return '例如：Binance BTC、冷錢包 ETH、USDT...';
           case 'property': return '例如：台北市大安區公寓、台中土地...';
+          case 'insurance': return '例如：儲蓄險保單價值、投資型保單現值...';
           case 'other': return '例如：汽車、借出款項...';
           default: return '資產名稱';
       }
@@ -410,7 +413,9 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
                     <option value="tw_stock">台股 (Taiwan Stock)</option>
                     <option value="us_stock">美股 (US Stock)</option>
                     <option value="crypto">加密貨幣 (Crypto)</option>
+                    <option value="insurance">保險 (Insurance)</option>
                     <option value="property">不動產 (Real Estate)</option>
+                    <option value="investment">其他投資 (Other Investment)</option>
                     <option value="other">其他 (Other)</option>
                   </select>
                </div>

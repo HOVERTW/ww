@@ -9,7 +9,7 @@ interface DashboardProps {
 }
 
 // Cyberpunk Neon Palette
-const COLORS = ['#22d3ee', '#e879f9', '#facc15', '#f472b6', '#4ade80', '#818cf8'];
+const COLORS = ['#22d3ee', '#e879f9', '#facc15', '#f472b6', '#4ade80', '#818cf8', '#fb923c'];
 
 export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   
@@ -18,11 +18,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     const totalLiabilities = data.liabilities.reduce((acc, curr) => acc + curr.value, 0);
     const netWorth = totalAssets - totalLiabilities;
     
-    const income = data.transactions
+    // Calculate Monthly Cash Flow (Current Month Only)
+    const now = new Date();
+    const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    
+    const currentMonthTransactions = data.transactions.filter(t => t.date.startsWith(currentMonthPrefix));
+
+    const income = currentMonthTransactions
       .filter(t => t.type === 'income')
       .reduce((acc, t) => acc + t.amount, 0);
     
-    const expenses = data.transactions
+    const expenses = currentMonthTransactions
       .filter(t => t.type === 'expense')
       .reduce((acc, t) => acc + t.amount, 0);
 
@@ -31,6 +37,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
   const expenseByCategory = useMemo(() => {
     const categoryMap: Record<string, number> = {};
+    
+    // Determine which transactions to show in pie chart
+    // Option A: All time expenses (better for overall habit analysis)
+    // Option B: Current month only (matches the cash flow card)
+    // Here we stick to Option A (All time) for better data density in the chart, 
+    // or we can filter for current month if consistent view is desired.
+    // Let's keep it "All Time" for the pie chart to be meaningful, but the top card is "Monthly".
+    
     data.transactions
       .filter(t => t.type === 'expense')
       .forEach(t => {
@@ -52,6 +66,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
        'crypto': '加密貨幣',
        'property': '不動產',
        'investment': '其他投資',
+       'insurance': '保險',
        'other': '其他'
     };
 
@@ -228,14 +243,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
           <p className="text-2xl stat-value font-bold text-rose-400 drop-shadow-[0_0_5px_rgba(251,113,133,0.5)]">${summary.totalLiabilities.toLocaleString()}</p>
         </div>
         
-        {/* Saved */}
+        {/* Monthly Cash Flow */}
         <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-amber-500/50 transition-colors">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-yellow-500"></div>
           <div className="flex items-center space-x-3 mb-2">
             <div className="p-2 bg-amber-900/30 rounded-lg text-amber-400 border border-amber-500/30">
               <PiggyBank size={20} />
             </div>
-            <h3 className="text-slate-400 text-sm font-medium uppercase tracking-wider font-mono">現金流結餘 (Savings)</h3>
+            <h3 className="text-slate-400 text-sm font-medium uppercase tracking-wider font-mono">當月現金流 (Monthly)</h3>
           </div>
           <p className={`text-2xl stat-value font-bold ${(summary.income - summary.expenses) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             ${(summary.income - summary.expenses).toLocaleString()}
@@ -339,7 +354,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
           )}
           {assetsByType.length > 0 && (
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-mono">
-               {assetsByType.slice(0, 6).map((item, idx) => (
+               {assetsByType.slice(0, 8).map((item, idx) => (
                  <div key={item.name} className="flex items-center justify-between border-b border-slate-800 pb-1">
                    <div className="flex items-center min-w-0">
                      <span className="w-2 h-2 rounded-sm mr-2 shadow-[0_0_5px_currentColor] flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length], color: COLORS[idx % COLORS.length] }}></span>
@@ -388,7 +403,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
           )}
           {expenseByCategory.length > 0 && (
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-mono">
-               {expenseByCategory.slice(0, 6).map((item, idx) => (
+               {expenseByCategory.slice(0, 8).map((item, idx) => (
                  <div key={item.name} className="flex items-center justify-between border-b border-slate-800 pb-1">
                    <div className="flex items-center min-w-0">
                      <span className="w-2 h-2 rounded-sm mr-2 shadow-[0_0_5px_currentColor] flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length], color: COLORS[idx % COLORS.length] }}></span>

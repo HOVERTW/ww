@@ -45,8 +45,8 @@ export interface RecurringTransaction {
   remainingOccurrences?: number; // If defined, stops after 0. If undefined, runs forever.
 }
 
-// Updated AssetType to distinguish markets
-export type AssetType = 'cash' | 'tw_stock' | 'us_stock' | 'crypto' | 'property' | 'investment' | 'other';
+// Updated AssetType to distinguish markets and include insurance
+export type AssetType = 'cash' | 'tw_stock' | 'us_stock' | 'crypto' | 'property' | 'investment' | 'insurance' | 'other';
 export type LiabilityType = 'credit_card' | 'loan' | 'mortgage' | 'other';
 
 export interface Asset {
