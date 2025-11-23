@@ -30,3 +30,14 @@ export const saveData = (data: FinancialData) => {
 export const generateId = (): string => {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 };
+
+export const validateImportData = (data: any): boolean => {
+  if (!data || typeof data !== 'object') return false;
+  
+  // Basic structural check
+  const hasTransactions = Array.isArray(data.transactions);
+  const hasAssets = Array.isArray(data.assets);
+  const hasLiabilities = Array.isArray(data.liabilities);
+  
+  return hasTransactions && hasAssets && hasLiabilities;
+};

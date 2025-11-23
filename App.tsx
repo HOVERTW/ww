@@ -6,7 +6,8 @@ import { Dashboard } from './components/Dashboard';
 import { Transactions } from './components/Transactions';
 import { BalanceSheet } from './components/BalanceSheet';
 import { AIAdvisor } from './components/AIAdvisor';
-import { LayoutDashboard, List, Scale, Sparkles, Download, AlertTriangle, Share, Menu, X } from 'lucide-react';
+import { Settings } from './components/Settings';
+import { LayoutDashboard, List, Scale, Sparkles, Download, AlertTriangle, Share, Menu, X, Settings as SettingsIcon } from 'lucide-react';
 
 function App() {
   const [data, setData] = useState<FinancialData>({ 
@@ -197,6 +198,11 @@ function App() {
     setDeferredPrompt(null);
   };
 
+  const handleImportData = (newData: FinancialData) => {
+    setData(newData);
+    saveData(newData);
+  };
+
   // --- Handlers ---
 
   const handleAddTransaction = (t: Transaction) => {
@@ -340,6 +346,7 @@ function App() {
     { id: AppView.TRANSACTIONS, label: '記帳管理', icon: <List size={20} /> },
     { id: AppView.BALANCE_SHEET, label: '資產負債', icon: <Scale size={20} /> },
     { id: AppView.ADVISOR, label: 'AI 智能顧問', icon: <Sparkles size={20} /> },
+    { id: AppView.SETTINGS, label: '系統設定', icon: <SettingsIcon size={20} /> },
   ];
 
   // --- Components ---
@@ -525,6 +532,8 @@ function App() {
         )}
 
         {view === AppView.ADVISOR && <AIAdvisor data={data} />}
+
+        {view === AppView.SETTINGS && <Settings data={data} onImportData={handleImportData} />}
       </main>
 
       {/* Bottom Navigation (Mobile) - Fixed at bottom */}
