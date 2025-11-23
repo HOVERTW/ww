@@ -33,8 +33,11 @@ function App() {
     if (!storedData.customCategories) storedData.customCategories = [];
     if (!storedData.recurringTransactions) storedData.recurringTransactions = [];
     
-    // Process Recurring Transactions
-    const processedData = processRecurringTransactions(storedData);
+    // 1. Process Recurring Rules (Generate new txns if due)
+    let processedData = processRecurringTransactions(storedData);
+
+    // 2. Process Pending Future Transactions (Check if any future txn is now due)
+    processedData = processPendingTransactions(processedData);
     
     setData(processedData);
     setIsLoaded(true);
@@ -47,13 +50,10 @@ function App() {
     });
 
     // --- Native App Detection ---
-    // Check if running in Capacitor (Native iOS Shell) or Standalone PWA
-    // Capacitor injects window.Capacitor
     const isCapacitor = (window as any).Capacitor !== undefined;
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone || isCapacitor;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-    // Only show warning if: Mobile + NOT Standalone + NOT Native App
     if (isMobile && !isStandalone && !isCapacitor) {
       setTimeout(() => setShowPwaWarning(true), 1000);
     }
@@ -89,10 +89,76 @@ function App() {
     }
   };
 
+  // --- Core Logic: Process Pending Transactions (Future -> Present) ---
+  const processPendingTransactions = (currentData: FinancialData): FinancialData => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    let newAssets = [...currentData.assets];
+    let newLiabilities = [...currentData.liabilities];
+    let hasChanges = false;
+
+    const updatedTransactions = currentData.transactions.map(t => {
+      // Treat undefined processed as true for legacy data to avoid double counting
+      // Only explicitly 'false' means it was a future transaction waiting to happen
+      if (t.processed === false && t.date <= todayStr) {
+        hasChanges = true;
+        // Apply Balance NOW
+        applyTransactionEffect(t, newAssets, newLiabilities);
+        return { ...t, processed: true };
+      }
+      return t;
+    });
+
+    if (!hasChanges) return currentData;
+
+    return {
+      ...currentData,
+      transactions: updatedTransactions,
+      assets: newAssets,
+      liabilities: newLiabilities
+    };
+  };
+
+  // Reusable function to apply transaction effect
+  const applyTransactionEffect = (t: Transaction, assets: Asset[], liabilities: Liability[]) => {
+    if (t.type === 'income') {
+      if (t.sourceType === 'asset') updateBalance(assets, liabilities, t.sourceId, t.sourceType, t.amount);
+      else updateBalance(assets, liabilities, t.sourceId, t.sourceType, -t.amount);
+    } else if (t.type === 'expense') {
+      if (t.sourceType === 'asset') updateBalance(assets, liabilities, t.sourceId, t.sourceType, -t.amount);
+      else updateBalance(assets, liabilities, t.sourceId, t.sourceType, t.amount);
+    } else if (t.type === 'transfer') {
+      // Source Out
+      if (t.sourceType === 'asset') updateBalance(assets, liabilities, t.sourceId, t.sourceType, -t.amount);
+      else updateBalance(assets, liabilities, t.sourceId, t.sourceType, t.amount);
+      // Destination In
+      if (t.destinationType === 'asset') updateBalance(assets, liabilities, t.destinationId, t.destinationType, t.amount);
+      else updateBalance(assets, liabilities, t.destinationId, t.destinationType, -t.amount);
+    }
+  };
+
+  // Reverse transaction effect (for undo/delete)
+  const reverseTransactionEffect = (t: Transaction, assets: Asset[], liabilities: Liability[]) => {
+    if (t.type === 'income') {
+       if (t.sourceType === 'asset') updateBalance(assets, liabilities, t.sourceId, t.sourceType, -t.amount);
+       else updateBalance(assets, liabilities, t.sourceId, t.sourceType, t.amount);
+    } else if (t.type === 'expense') {
+       if (t.sourceType === 'asset') updateBalance(assets, liabilities, t.sourceId, t.sourceType, t.amount);
+       else updateBalance(assets, liabilities, t.sourceId, t.sourceType, -t.amount);
+    } else if (t.type === 'transfer') {
+       // Reverse Source
+       if (t.sourceType === 'asset') updateBalance(assets, liabilities, t.sourceId, t.sourceType, t.amount);
+       else updateBalance(assets, liabilities, t.sourceId, t.sourceType, -t.amount);
+       // Reverse Dest
+       if (t.destinationType === 'asset') updateBalance(assets, liabilities, t.destinationId, t.destinationType, -t.amount);
+       else updateBalance(assets, liabilities, t.destinationId, t.destinationType, t.amount);
+    }
+  };
+
   // --- Core Logic: Process Recurring Transactions ---
   const processRecurringTransactions = (currentData: FinancialData): FinancialData => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
 
     let newTransactions: Transaction[] = [];
     let updatedAssets = [...currentData.assets];
@@ -105,6 +171,7 @@ function App() {
       let modified = false;
       let ruleClone = { ...rule };
 
+      // Loop to catch up all missed recurrences up to today
       while (nextDue <= today) {
         if (ruleClone.remainingOccurrences !== undefined && ruleClone.remainingOccurrences <= 0) {
            ruleClone.active = false;
@@ -112,10 +179,13 @@ function App() {
         }
 
         modified = true;
+        const nextDueStr = nextDue.toISOString().split('T')[0];
         
+        // Generate the transaction
+        // Note: Since nextDue <= today, these are processed immediately
         const newTxn: Transaction = {
           id: generateId(),
-          date: nextDue.toISOString().split('T')[0],
+          date: nextDueStr,
           type: rule.type,
           amount: rule.amount,
           category: rule.category,
@@ -124,9 +194,13 @@ function App() {
           sourceType: rule.sourceType,
           destinationId: rule.destinationId,
           destinationType: rule.destinationType,
-          recurringRuleId: rule.id // Link back to rule
+          recurringRuleId: rule.id,
+          processed: true // Immediate processing for catch-up
         };
         newTransactions.push(newTxn);
+        
+        // Apply Balance immediately since it's due/past
+        applyTransactionEffect(newTxn, updatedAssets, updatedLiabilities);
 
         if (ruleClone.remainingOccurrences !== undefined) {
           ruleClone.remainingOccurrences -= 1;
@@ -135,43 +209,14 @@ function App() {
           }
         }
 
-        // Apply Balance Impact for Recurring
-        if (newTxn.type === 'income') {
-          updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, newTxn.amount); // Income adds to asset/debt(rare)
-        } else if (newTxn.type === 'expense') {
-           // Expense: Asset decreases (-), Liability increases (+) (spending on credit)
-           if (newTxn.sourceType === 'asset') {
-              updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, -newTxn.amount);
-           } else {
-              updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, newTxn.amount);
-           }
-        } else if (newTxn.type === 'transfer') {
-           // Transfer Logic: Source decreases (Asset-) or increases (Liab+), Dest increases (Asset+) or decreases (Liab-)
-           
-           // 1. Handle Source (Outgoing)
-           if (newTxn.sourceType === 'asset') {
-              updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, -newTxn.amount);
-           } else {
-              // Spending from Liability (Transfer from Credit Card to Cash?) -> Debt increases
-              updateBalance(updatedAssets, updatedLiabilities, newTxn.sourceId, newTxn.sourceType, newTxn.amount);
-           }
-
-           // 2. Handle Destination (Incoming)
-           if (newTxn.destinationType === 'asset') {
-              updateBalance(updatedAssets, updatedLiabilities, newTxn.destinationId, newTxn.destinationType, newTxn.amount);
-           } else {
-              // Paying off Liability (Transfer to Credit Card) -> Debt decreases
-              updateBalance(updatedAssets, updatedLiabilities, newTxn.destinationId, newTxn.destinationType, -newTxn.amount);
-           }
-        }
-
+        // Advance date
         nextDue.setMonth(nextDue.getMonth() + 1);
         if (!ruleClone.active) break;
       }
 
       if (modified) {
         ruleClone.nextDueDate = nextDue.toISOString().split('T')[0];
-        ruleClone.lastProcessedDate = new Date().toISOString().split('T')[0];
+        ruleClone.lastProcessedDate = todayStr;
       }
       return ruleClone;
     });
@@ -204,99 +249,56 @@ function App() {
     saveData(newData);
   };
 
-  // --- Handlers ---
+  // --- CRUD Handlers ---
 
   const handleAddTransaction = (t: Transaction) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isFuture = t.date > todayStr;
+
     let newAssets = [...data.assets];
     let newLiabilities = [...data.liabilities];
 
-    if (t.type === 'income') {
-      // Income increases value
-      if (t.sourceType === 'asset') {
-         updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-      } else {
-         updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-      }
-    } else if (t.type === 'expense') {
-      // Expense reduces Asset value OR Increases Liability (Debt)
-      if (t.sourceType === 'asset') {
-        updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-      } else {
-        updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-      }
-    } else if (t.type === 'transfer') {
-      // 1. Source Out
-      if (t.sourceType === 'asset') {
-        updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-      } else {
-        // Source is Liability (e.g. Cash Advance from CC) -> Debt Up
-        updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-      }
-
-      // 2. Destination In
-      if (t.destinationType === 'asset') {
-        updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, t.amount);
-      } else {
-        // Dest is Liability (e.g. Paying CC from Cash) -> Debt Down
-        updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, -t.amount);
-      }
+    // Only apply balance effect if NOT future
+    if (!isFuture) {
+      applyTransactionEffect(t, newAssets, newLiabilities);
     }
+
+    const newTransaction = { ...t, processed: !isFuture };
 
     setData(prev => ({ 
       ...prev, 
-      transactions: [t, ...prev.transactions],
+      transactions: [newTransaction, ...prev.transactions],
       assets: newAssets,
       liabilities: newLiabilities
     }));
   };
 
   const handleUpdateTransaction = (updatedT: Transaction) => {
-    // First delete the old one (reverse its effect)
     const oldT = data.transactions.find(t => t.id === updatedT.id);
     if (!oldT) return;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isFuture = updatedT.date > todayStr;
 
     let newAssets = [...data.assets];
     let newLiabilities = [...data.liabilities];
 
-    // 1. Revert Old Transaction
-    const revert = (t: Transaction) => {
-        if (t.type === 'income') {
-           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-        } else if (t.type === 'expense') {
-           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-        } else if (t.type === 'transfer') {
-           // Reverse Source
-           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-           // Reverse Dest
-           if (t.destinationType === 'asset') updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, -t.amount);
-           else updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, t.amount);
-        }
-    };
-    revert(oldT);
+    // 1. Revert Old Transaction (Only if it was processed)
+    // Legacy data undefined processed = true
+    if (oldT.processed !== false) {
+        reverseTransactionEffect(oldT, newAssets, newLiabilities);
+    }
 
-    // 2. Apply New Transaction
-    const apply = (t: Transaction) => {
-        if (t.type === 'income') {
-           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-        } else if (t.type === 'expense') {
-           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-        } else if (t.type === 'transfer') {
-           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
-           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
-           if (t.destinationType === 'asset') updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, t.amount);
-           else updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, -t.amount);
-        }
-    };
-    apply(updatedT);
+    // 2. Apply New Transaction (Only if NOT future)
+    if (!isFuture) {
+        applyTransactionEffect(updatedT, newAssets, newLiabilities);
+    }
+
+    const finalT = { ...updatedT, processed: !isFuture };
 
     setData(prev => ({
         ...prev,
-        transactions: prev.transactions.map(t => t.id === updatedT.id ? updatedT : t),
+        transactions: prev.transactions.map(t => t.id === updatedT.id ? finalT : t),
         assets: newAssets,
         liabilities: newLiabilities
     }));
@@ -309,32 +311,9 @@ function App() {
     let newAssets = [...data.assets];
     let newLiabilities = [...data.liabilities];
 
-    // Reverse the logic of Add
-    if (transaction.type === 'income') {
-       if (transaction.sourceType === 'asset') {
-          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
-       } else {
-          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
-       }
-    } else if (transaction.type === 'expense') {
-       if (transaction.sourceType === 'asset') {
-          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
-       } else {
-          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
-       }
-    } else if (transaction.type === 'transfer') {
-       // Reverse Source
-       if (transaction.sourceType === 'asset') {
-          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
-       } else {
-          updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
-       }
-       // Reverse Dest
-       if (transaction.destinationType === 'asset') {
-          updateBalance(newAssets, newLiabilities, transaction.destinationId, transaction.destinationType, -transaction.amount);
-       } else {
-          updateBalance(newAssets, newLiabilities, transaction.destinationId, transaction.destinationType, transaction.amount);
-       }
+    // Only reverse effect if it was processed
+    if (transaction.processed !== false) {
+        reverseTransactionEffect(transaction, newAssets, newLiabilities);
     }
 
     setData(prev => ({ 
@@ -387,45 +366,21 @@ function App() {
     }));
   };
 
-  // Enhanced delete handler that supports deleting history
   const handleDeleteRecurringTransaction = (id: string, deleteAllHistory: boolean) => {
     let newAssets = [...data.assets];
     let newLiabilities = [...data.liabilities];
     let updatedTransactions = [...data.transactions];
 
     if (deleteAllHistory) {
-      // Find all transactions linked to this rule
       const linkedTransactions = updatedTransactions.filter(t => t.recurringRuleId === id);
-
-      // Revert balances for all of them
+      
+      // Revert balances only for processed transactions
       linkedTransactions.forEach(transaction => {
-        if (transaction.type === 'income') {
-           if (transaction.sourceType === 'asset') {
-              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
-           } else {
-              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
-           }
-        } else if (transaction.type === 'expense') {
-           if (transaction.sourceType === 'asset') {
-              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
-           } else {
-              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
-           }
-        } else if (transaction.type === 'transfer') {
-           if (transaction.sourceType === 'asset') {
-              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
-           } else {
-              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
-           }
-           if (transaction.destinationType === 'asset') {
-              updateBalance(newAssets, newLiabilities, transaction.destinationId, transaction.destinationType, -transaction.amount);
-           } else {
-              updateBalance(newAssets, newLiabilities, transaction.destinationId, transaction.destinationType, transaction.amount);
-           }
+        if (transaction.processed !== false) {
+            reverseTransactionEffect(transaction, newAssets, newLiabilities);
         }
       });
 
-      // Filter them out
       updatedTransactions = updatedTransactions.filter(t => t.recurringRuleId !== id);
     }
 
@@ -446,25 +401,19 @@ function App() {
     { id: AppView.SETTINGS, label: '系統設定', icon: <SettingsIcon size={20} /> },
   ];
 
-  // --- Components ---
-  
-  // Cyberpunk WW Logo Component
   const CyberpunkLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
     <div className={`${className} relative bg-slate-900 rounded-lg border border-slate-700 flex items-center justify-center overflow-hidden shadow-[0_0_15px_rgba(6,182,212,0.3)] group`}>
        <div className="absolute inset-0 bg-cyan-900/20 group-hover:bg-cyan-500/10 transition-colors"></div>
-       {/* Glitch Layer 1 (Cyan) */}
        <div className="absolute inset-0 flex items-center justify-center translate-x-[-1px] translate-y-0 opacity-80">
           <span className="font-mono font-black text-xl sm:text-2xl text-cyan-400 tracking-tighter flex leading-none">
             <span>W</span><span className="-ml-1">W</span>
           </span>
        </div>
-       {/* Glitch Layer 2 (Magenta) */}
        <div className="absolute inset-0 flex items-center justify-center translate-x-[1px] translate-y-[1px] opacity-80 mix-blend-screen">
           <span className="font-mono font-black text-xl sm:text-2xl text-fuchsia-500 tracking-tighter flex leading-none">
             <span>W</span><span className="-ml-1">W</span>
           </span>
        </div>
-       {/* Main Layer (White) */}
        <div className="relative z-10 flex items-center justify-center mix-blend-overlay">
           <span className="font-mono font-black text-xl sm:text-2xl text-white tracking-tighter flex leading-none">
             <span>W</span><span className="-ml-1">W</span>
@@ -476,17 +425,14 @@ function App() {
   return (
     <div className="h-full bg-slate-950 text-slate-200 font-sans md:pl-64 selection:bg-cyan-500/30 relative flex flex-col">
       
-      {/* Background effects */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-900/20 rounded-full blur-[120px]"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-cyan-900/10 rounded-full blur-[120px]"></div>
       </div>
 
-      {/* Mobile PWA Install Warning Modal */}
       {showPwaWarning && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/90 backdrop-blur-md animate-fade-in">
           <div className="bg-slate-900 w-full sm:max-w-md border-t sm:border border-rose-500/50 sm:rounded-2xl shadow-[0_0_50px_rgba(244,63,94,0.3)] p-6 relative overflow-hidden mb-safe sm:mb-0">
-             {/* Scanning Line Effect */}
              <div className="absolute top-0 left-0 w-full h-1 bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)] animate-scan-line"></div>
              <div className="absolute top-0 right-0 p-4 text-[10px] text-rose-900 font-tech font-bold">SECURITY_PROTOCOL_OVERRIDE</div>
 
@@ -504,7 +450,6 @@ function App() {
                 <p>
                    偵測到您正在使用手機瀏覽器開啟。為了防止資料因瀏覽器清除快取而遺失，<span className="text-cyan-400 font-bold">請務必將此應用程式加入主畫面</span>。
                 </p>
-                
                 <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
                    <p className="text-xs text-slate-400 mb-2 font-mono uppercase">Install Instructions:</p>
                    <ol className="list-decimal list-inside space-y-2 text-slate-200">
@@ -529,7 +474,6 @@ function App() {
         </div>
       )}
 
-      {/* Sidebar (Desktop) */}
       <aside className="fixed left-0 top-0 h-full w-64 bg-slate-900/90 backdrop-blur-xl border-r border-slate-800 hidden md:flex flex-col z-20">
         <div className="p-6 border-b border-slate-800">
           <div className="flex items-center gap-3">
@@ -555,7 +499,6 @@ function App() {
         </nav>
         
         <div className="px-4 pb-4 space-y-4">
-          {/* Install App Button (Only shows if supported and not installed) */}
           {showInstallBtn && (
             <button 
               onClick={handleInstallClick}
@@ -574,7 +517,6 @@ function App() {
         </div>
       </aside>
 
-      {/* Header (Mobile) */}
       <header className="md:hidden bg-slate-900/90 backdrop-blur-md border-b border-slate-800 p-4 sticky top-0 z-30 flex items-center justify-between shadow-lg pt-safe">
          <div className="flex items-center gap-2">
             <CyberpunkLogo className="w-9 h-9" />
@@ -590,7 +532,6 @@ function App() {
          )}
       </header>
 
-      {/* Main Content (Scrollable Area) */}
       <main className="flex-1 overflow-y-auto max-w-5xl w-full mx-auto p-4 md:p-8 pt-6 pb-28 md:pb-8 relative z-10 scrollbar-none">
         <header className="mb-8 hidden md:block border-b border-slate-800 pb-4">
           <h2 className="text-3xl font-bold text-slate-100 tracking-tight font-mono">
@@ -634,7 +575,6 @@ function App() {
         {view === AppView.SETTINGS && <Settings data={data} onImportData={handleImportData} />}
       </main>
 
-      {/* Bottom Navigation (Mobile) - Fixed at bottom */}
       <nav className="md:hidden flex-none bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-30 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.5)] fixed bottom-0 left-0 w-full">
         <div className="flex justify-around p-2">
           {navItems.map(item => (

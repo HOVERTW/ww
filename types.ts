@@ -19,6 +19,9 @@ export interface Transaction {
 
   // Link to parent recurring rule
   recurringRuleId?: string;
+
+  // Ledger Status
+  processed?: boolean; // If true, balance has been updated. If false/undefined, it is pending (future).
 }
 
 export interface RecurringTransaction {
