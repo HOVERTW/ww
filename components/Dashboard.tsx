@@ -22,6 +22,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     const now = new Date();
     const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     
+    // Filter transactions for the current month
     const currentMonthTransactions = data.transactions.filter(t => t.date.startsWith(currentMonthPrefix));
 
     const income = currentMonthTransactions
@@ -41,9 +42,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     // Determine which transactions to show in pie chart
     // Option A: All time expenses (better for overall habit analysis)
     // Option B: Current month only (matches the cash flow card)
-    // Here we stick to Option A (All time) for better data density in the chart, 
-    // or we can filter for current month if consistent view is desired.
-    // Let's keep it "All Time" for the pie chart to be meaningful, but the top card is "Monthly".
+    // Keeping "All Time" for better data density in the chart.
     
     data.transactions
       .filter(t => t.type === 'expense')
@@ -250,7 +249,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             <div className="p-2 bg-amber-900/30 rounded-lg text-amber-400 border border-amber-500/30">
               <PiggyBank size={20} />
             </div>
-            <h3 className="text-slate-400 text-sm font-medium uppercase tracking-wider font-mono">當月現金流 (Monthly)</h3>
+            <h3 className="text-slate-400 text-sm font-medium uppercase tracking-wider font-mono">當月結餘 (Monthly)</h3>
           </div>
           <p className={`text-2xl stat-value font-bold ${(summary.income - summary.expenses) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             ${(summary.income - summary.expenses).toLocaleString()}

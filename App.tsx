@@ -360,10 +360,18 @@ function App() {
   };
 
   const handleAddRecurringTransaction = (r: RecurringTransaction) => {
-    setData(prev => ({
-      ...prev,
-      recurringTransactions: [...(prev.recurringTransactions || []), r]
-    }));
+    setData(prev => {
+      const list = prev.recurringTransactions || [];
+      const index = list.findIndex(i => i.id === r.id);
+      if (index !== -1) {
+         // Update existing
+         const newList = [...list];
+         newList[index] = r;
+         return { ...prev, recurringTransactions: newList };
+      }
+      // Add new
+      return { ...prev, recurringTransactions: [...list, r] };
+    });
   };
 
   const handleDeleteRecurringTransaction = (id: string, deleteAllHistory: boolean) => {
