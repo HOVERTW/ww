@@ -10,7 +10,7 @@ import {
   Home, Gamepad2, Heart, GraduationCap, Users, FileText, TrendingDown, Shield, 
   Cat, Briefcase, Award, TrendingUp, PieChart, Clock, Building, Gift, RotateCcw, 
   MoreHorizontal, Smartphone, Plane, Wrench, Landmark, Baby, Edit3, RefreshCw, X, Check,
-  Repeat, History, Settings, Infinity, ArrowRightLeft, ArrowRight
+  Repeat, History, Settings, Infinity, ArrowRightLeft, ArrowRight, AlertCircle
 } from 'lucide-react';
 
 interface TransactionsProps {
@@ -20,10 +20,11 @@ interface TransactionsProps {
   customCategories: CustomCategory[];
   recurringTransactions: RecurringTransaction[];
   onAddTransaction: (t: Transaction) => void;
+  onUpdateTransaction: (t: Transaction) => void;
   onDeleteTransaction: (id: string) => void;
   onAddCustomCategory: (c: CustomCategory) => void;
   onAddRecurringTransaction: (r: RecurringTransaction) => void;
-  onDeleteRecurringTransaction: (id: string) => void;
+  onDeleteRecurringTransaction: (id: string, deleteAllHistory: boolean) => void;
 }
 
 // Define Category Lists with Icons
@@ -81,14 +82,15 @@ const getIconComponent = (iconName: string) => {
 
 // Helper for compact number formatting
 const formatCompactAmount = (num: number) => {
-  if (num < 10000) return num.toLocaleString(); // 9999
-  if (num < 1000000) return `${(num / 10000).toFixed(1)}萬`; // 1.1萬
+  const absNum = Math.abs(num);
+  if (absNum < 10000) return num.toLocaleString(); // 9999 or -9999
+  if (absNum < 1000000) return `${(num / 10000).toFixed(1)}萬`; // 1.1萬
   return `${(num / 1000000).toFixed(1)}M`; // 10.1M
 };
 
 export const Transactions: React.FC<TransactionsProps> = ({ 
   transactions, assets, liabilities, customCategories, recurringTransactions,
-  onAddTransaction, onDeleteTransaction, onAddCustomCategory,
+  onAddTransaction, onUpdateTransaction, onDeleteTransaction, onAddCustomCategory,
   onAddRecurringTransaction, onDeleteRecurringTransaction
 }) => {
   const [activeTab, setActiveTab] = useState<'history' | 'recurring'>('history');
@@ -97,8 +99,10 @@ export const Transactions: React.FC<TransactionsProps> = ({
   
   // Calendar State
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDateDetail, setSelectedDateDetail] = useState<string | null>(null); // For Modal
 
   // Transaction Form State
+  const [editingId, setEditingId] = useState<string | null>(null); // If null, we are adding. If set, we are editing.
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
@@ -112,8 +116,8 @@ export const Transactions: React.FC<TransactionsProps> = ({
 
   // Recurring State in Form
   const [isRecurring, setIsRecurring] = useState(false);
-  const [recurringLimit, setRecurringLimit] = useState<'infinite' | 'fixed'>('infinite');
-  const [recurringCount, setRecurringCount] = useState<number>(12);
+  // REMOVED: recurringLimit state (now always fixed)
+  const [recurringCount, setRecurringCount] = useState<number | string>(12); // Allow string for input handling
 
   // --- Custom Category Modal State ---
   const [isEditingCategory, setIsEditingCategory] = useState(false);
@@ -123,20 +127,45 @@ export const Transactions: React.FC<TransactionsProps> = ({
   const [selectedIcon, setSelectedIcon] = useState('');
   const [isSuggesting, setIsSuggesting] = useState(false);
 
+  // --- Helpers ---
+  const resetForm = () => {
+    setEditingId(null);
+    setAmount('');
+    setCategory(''); 
+    setNote('');
+    setSourceId('');
+    setDestinationId('');
+    setIsRecurring(false);
+    setRecurringCount(12); // Reset to default
+    setIsAdding(false);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || !category) return;
     
-    if (type === 'transfer' && (!sourceId || !destinationId)) {
-      alert('轉帳必須選擇來源與目的帳戶');
-      return;
+    // 1. Basic Validation with Alerts
+    if (!amount) {
+        alert('請輸入金額 (AMOUNT)');
+        return;
+    }
+    if (!category) {
+        alert('請選擇一個類別 (CATEGORY)');
+        return;
     }
     
-    if (type === 'transfer' && sourceId === destinationId) {
-      alert('來源與目的帳戶不能相同');
-      return;
+    // 2. Transfer Validation
+    if (type === 'transfer') {
+        if (!sourceId || !destinationId) {
+          alert('轉帳必須選擇「來源帳戶」與「轉入帳戶」');
+          return;
+        }
+        if (sourceId === destinationId) {
+          alert('來源與轉入帳戶不能相同');
+          return;
+        }
     }
 
+    // 3. Account Mapping
     let sourceType: 'asset' | 'liability' | undefined = undefined;
     let destinationType: 'asset' | 'liability' | undefined = undefined;
     
@@ -150,27 +179,37 @@ export const Transactions: React.FC<TransactionsProps> = ({
       else if (liabilities.some(l => l.id === destinationId)) destinationType = 'liability';
     }
 
-    if (isRecurring) {
+    // 4. Recurring Logic (Only available when adding new, not editing existing to recurring)
+    if (isRecurring && !editingId) {
        const dayOfMonth = new Date(date).getDate();
        const selectedDate = new Date(date);
        const today = new Date();
+       today.setHours(0,0,0,0);
+       selectedDate.setHours(0,0,0,0);
+
        const isDueTodayOrPast = selectedDate <= today;
 
-       let remaining = recurringLimit === 'fixed' ? recurringCount : undefined;
+       // ALWAYS use the count, no infinite option anymore
+       const countVal = typeof recurringCount === 'string' ? parseInt(recurringCount) || 12 : recurringCount;
+       let remaining = countVal;
 
-       if (isDueTodayOrPast && remaining !== undefined) {
-         remaining = remaining > 0 ? remaining - 1 : 0;
+       // If we execute one immediately, reduce count
+       if (isDueTodayOrPast && remaining > 0) {
+         remaining = remaining - 1;
        }
 
+       // Calculate next due date
        let nextDue = date;
        if (isDueTodayOrPast) {
          const d = new Date(date);
          d.setMonth(d.getMonth() + 1);
          nextDue = d.toISOString().split('T')[0];
        }
+       
+       const newRuleId = generateId();
 
        const recurring: RecurringTransaction = {
-          id: generateId(),
+          id: newRuleId,
           name: note || category,
           amount: parseFloat(amount),
           type,
@@ -186,10 +225,12 @@ export const Transactions: React.FC<TransactionsProps> = ({
           remainingOccurrences: remaining
        };
 
-       if (remaining === undefined || remaining > 0) {
+       // Add the rule
+       if (remaining >= 0) {
          onAddRecurringTransaction(recurring);
        }
 
+       // If the start date is today or past, add the first transaction immediately
        if (isDueTodayOrPast) {
          const newTransaction: Transaction = {
            id: generateId(),
@@ -197,18 +238,23 @@ export const Transactions: React.FC<TransactionsProps> = ({
            type,
            amount: parseFloat(amount),
            category,
-           note: `[自動扣款首筆] ${note} ${recurringLimit === 'fixed' ? `(共 ${recurringCount} 期)` : ''}`,
+           note: `[自動扣款首筆] ${note} (共 ${countVal} 期)`,
            sourceId: sourceId || undefined,
            sourceType,
            destinationId: destinationId || undefined,
-           destinationType
+           destinationType,
+           recurringRuleId: newRuleId
          };
          onAddTransaction(newTransaction);
+         alert(`已儲存週期設定，並自動新增了第一筆交易！(共 ${countVal} 期)`);
+       } else {
+         alert(`已儲存週期設定！第一筆交易將於 ${date} 自動執行。(共 ${countVal} 期)`);
        }
 
     } else {
-      const newTransaction: Transaction = {
-        id: generateId(),
+      // 5. Standard Transaction (Add or Update)
+      const transactionPayload: Transaction = {
+        id: editingId || generateId(), // Use existing ID if editing
         date,
         type,
         amount: parseFloat(amount),
@@ -217,19 +263,55 @@ export const Transactions: React.FC<TransactionsProps> = ({
         sourceId: sourceId || undefined,
         sourceType,
         destinationId: destinationId || undefined,
-        destinationType
+        destinationType,
+        // Preserve existing recurring link if we are editing a transaction that belongs to a rule
+        recurringRuleId: editingId ? transactions.find(t => t.id === editingId)?.recurringRuleId : undefined
       };
-      onAddTransaction(newTransaction);
+
+      if (editingId) {
+        onUpdateTransaction(transactionPayload);
+      } else {
+        onAddTransaction(transactionPayload);
+      }
     }
 
-    setAmount('');
-    setCategory(''); 
-    setNote('');
-    setSourceId('');
-    setDestinationId('');
-    setIsRecurring(false);
-    setRecurringLimit('infinite');
-    setIsAdding(false);
+    resetForm();
+  };
+
+  const handleEditClick = (t: Transaction) => {
+    setEditingId(t.id);
+    setDate(t.date);
+    setType(t.type);
+    setAmount(t.amount.toString());
+    setCategory(t.category);
+    setNote(t.note);
+    setSourceId(t.sourceId || '');
+    setDestinationId(t.destinationId || '');
+    setIsRecurring(false); // Editing existing transaction doesn't change recurring rule directly
+    setIsAdding(true);
+    setSelectedDateDetail(null); // Close modal if open
+  };
+
+  // Handle Recurring Deletion
+  const handleDeleteRecurringClick = (id: string) => {
+    const choice = window.confirm("是否確定要取消此循環交易設定？\n\n點擊「確定」繼續下一步。");
+    if (!choice) return;
+
+    const deleteHistory = window.confirm("【請選擇取消範圍】\n\n您希望如何處理過去已經產生的交易紀錄？\n\n【確定】= 「從頭到尾都取消」 (刪除設定 + 清除所有歷史紀錄)\n【取消】= 「從這次以後都取消」 (僅刪除未來設定，保留歷史紀錄)");
+    
+    onDeleteRecurringTransaction(id, deleteHistory);
+  };
+
+  // Handle Single Transaction Deletion that might be linked
+  const handleDeleteTransactionClick = (id: string) => {
+      const txn = transactions.find(t => t.id === id);
+      if (txn && txn.recurringRuleId) {
+         const choice = window.confirm("這是一筆「循環交易」產生的紀錄。\n\n您希望：\n【確定】= 僅刪除這一筆 (例外處理)\n【取消】= 什麼都不做 (取消操作)");
+         if(choice) onDeleteTransaction(id);
+      } else {
+         const choice = window.confirm("確定要刪除這筆交易嗎？");
+         if(choice) onDeleteTransaction(id);
+      }
   };
 
   // Custom Category Logic
@@ -270,15 +352,73 @@ export const Transactions: React.FC<TransactionsProps> = ({
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   };
 
+  // Calculate Future/Projected Transactions for the current View Month
+  const projectedTransactions = useMemo(() => {
+     const projected: any[] = [];
+     const viewYear = currentDate.getFullYear();
+     const viewMonth = currentDate.getMonth(); // 0-11
+     
+     recurringTransactions.forEach(rule => {
+        if (!rule.active) return;
+        
+        // We want to show the projection for this month's specific day
+        // Note: If the "nextDueDate" is in a future month, it means this month is already processed or skipped.
+        // But for visual calendar consistency, users expect to see the recurring item on the Nth day of EVERY month.
+        
+        // Simple logic: If the rule is active, show a ghost item on 'dayOfMonth' of the current view month
+        // UNLESS: 
+        // 1. The date is in the past relative to "Next Due Date" (meaning it's already done or skipped)
+        // 2. The date is in the past relative to "Today" (don't project past ghost items, rely on actual history)
+        
+        const targetDate = new Date(viewYear, viewMonth, rule.dayOfMonth);
+        const nextDue = new Date(rule.nextDueDate);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+
+        // If the target date for this month is invalid (e.g. Feb 30), skip
+        if (targetDate.getMonth() !== viewMonth) return;
+
+        const dateString = targetDate.toISOString().split('T')[0];
+
+        // Only show projection if:
+        // 1. The target date is >= Today (Future or Today)
+        // 2. We haven't already generated a real transaction for this rule on this date (deduplication)
+        
+        const exists = transactions.some(t => t.recurringRuleId === rule.id && t.date === dateString);
+        
+        if (!exists && targetDate >= today) {
+            // Check remaining occurrences if fixed
+            // This is a simplified visual check. Accurate check requires iterating from nextDueDate.
+            // For UI simplicity, we just show it if active.
+            projected.push({
+                ...rule,
+                isProjected: true,
+                date: dateString,
+                note: '(預計發生)'
+            });
+        }
+     });
+     return projected;
+  }, [recurringTransactions, currentDate, transactions]);
+
   // Group transactions by date for the calendar
   const transactionsByDate = useMemo(() => {
-    const map: Record<string, Transaction[]> = {};
+    const map: Record<string, any[]> = {};
+    
+    // 1. Real Transactions
     transactions.forEach(t => {
       if (!map[t.date]) map[t.date] = [];
       map[t.date].push(t);
     });
+
+    // 2. Projected Transactions
+    projectedTransactions.forEach(p => {
+        if (!map[p.date]) map[p.date] = [];
+        map[p.date].push(p);
+    });
+
     return map;
-  }, [transactions]);
+  }, [transactions, projectedTransactions]);
 
   const dailyStats = useMemo(() => {
     const stats: Record<string, { income: number; expense: number }> = {};
@@ -290,7 +430,8 @@ export const Transactions: React.FC<TransactionsProps> = ({
     return stats;
   }, [transactions]);
 
-  const formatDuration = (months: number) => {
+  const formatDuration = (val: number | string) => {
+    const months = typeof val === 'string' ? parseInt(val) || 0 : val;
     if (months < 12) return `${months} 個月`;
     const y = Math.floor(months / 12);
     const m = months % 12;
@@ -304,24 +445,27 @@ export const Transactions: React.FC<TransactionsProps> = ({
     const month = currentDate.getMonth();
 
     for (let i = 0; i < firstDayOfMonth; i++) {
-      days.push(<div key={`empty-${i}`} className="min-h-[100px] h-32 bg-slate-900/30 border border-slate-800/50"></div>);
+      days.push(<div key={`empty-${i}`} className="min-h-[80px] sm:min-h-[100px] h-auto bg-slate-900/30 border border-slate-800/50"></div>);
     }
 
     for (let d = 1; d <= daysInMonth; d++) {
       const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const stat = dailyStats[dateString];
-      const dailyTransactions = transactionsByDate[dateString] || [];
+      const dailyItems = transactionsByDate[dateString] || [];
       const isToday = new Date().toISOString().split('T')[0] === dateString;
       const isSelected = date === dateString;
+
+      // Calculate Net for the day (Income - Expense)
+      const netAmount = stat ? stat.income - stat.expense : 0;
 
       days.push(
         <div 
           key={d} 
           onClick={() => {
-            setDate(dateString);
-            if(!isAdding) setIsAdding(true);
+             setDate(dateString);
+             setSelectedDateDetail(dateString);
           }}
-          className={`min-h-[100px] h-32 border p-1 relative group cursor-pointer transition-all overflow-hidden flex flex-col
+          className={`min-h-[80px] sm:min-h-[100px] border p-1 relative group cursor-pointer transition-all overflow-hidden flex flex-col
             ${isSelected 
               ? 'border-cyan-500 bg-cyan-900/10 shadow-[inset_0_0_10px_rgba(6,182,212,0.2)]' 
               : 'border-slate-800 hover:border-slate-600 hover:bg-slate-800/50'}
@@ -337,40 +481,24 @@ export const Transactions: React.FC<TransactionsProps> = ({
           </div>
 
           {/* Scrollable Transaction Items */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-w-1 scrollbar-thumb-slate-700 space-y-0.5 mb-1">
-             {dailyTransactions.map(t => (
-               <div key={t.id} className="flex justify-between items-center text-[10px] sm:text-[11px] font-mono leading-tight px-0.5 hover:bg-white/5 rounded">
-                 <span className={`truncate max-w-[55%] ${
+          <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none space-y-0.5 mb-1">
+             {dailyItems.map((t, idx) => (
+               <div key={t.id || `proj-${idx}`} className={`flex justify-between items-center text-[9px] sm:text-[10px] font-mono leading-tight px-0.5 rounded ${t.isProjected ? 'bg-slate-800/30 border border-dashed border-slate-700/50 opacity-70' : 'bg-black/20'}`}>
+                 <span className={`truncate w-full ${
                     t.type === 'income' ? 'text-emerald-300' : 
-                    t.type === 'expense' ? 'text-rose-300' : 'text-slate-400'
+                    t.type === 'expense' ? 'text-rose-300' : 'text-blue-300'
                  }`}>
-                   {t.category}
-                 </span>
-                 <span className={`${
-                    t.type === 'income' ? 'text-emerald-400' : 
-                    t.type === 'expense' ? 'text-rose-400' : 'text-slate-400'
-                 }`}>
-                   {formatCompactAmount(t.amount)}
+                   {t.isProjected && <span className="text-[8px] mr-1">↺</span>}
+                   {t.type === 'transfer' ? '⇄ ' : ''}{t.category}
                  </span>
                </div>
              ))}
           </div>
           
-          {/* Daily Total Summary (Footer) */}
-          {(stat?.income || stat?.expense) && (
-            <div className="flex flex-col gap-0.5 border-t border-slate-700/50 pt-1 mt-auto flex-shrink-0">
-              {stat?.income > 0 && (
-                <div className="text-[9px] font-mono text-emerald-500 flex justify-between items-center">
-                  <span>收</span>
-                  <span>+{formatCompactAmount(stat.income)}</span>
-                </div>
-              )}
-              {stat?.expense > 0 && (
-                <div className="text-[9px] font-mono text-rose-500 flex justify-between items-center">
-                  <span>支</span>
-                  <span>-{formatCompactAmount(stat.expense)}</span>
-                </div>
-              )}
+          {/* Daily Net Summary - Single Number */}
+          {netAmount !== 0 && (
+            <div className={`flex justify-center border-t border-slate-700/50 pt-0.5 mt-auto flex-shrink-0 font-mono text-[9px] sm:text-[10px] font-bold ${netAmount > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+               {netAmount > 0 ? '+' : ''}{formatCompactAmount(netAmount)}
             </div>
           )}
 
@@ -434,19 +562,19 @@ export const Transactions: React.FC<TransactionsProps> = ({
   );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       
       {/* --- Tab Switcher --- */}
-      <div className="flex space-x-4 border-b border-slate-700 pb-1">
+      <div className="flex space-x-4 border-b border-slate-700 pb-1 overflow-x-auto scrollbar-none">
         <button 
            onClick={() => setActiveTab('history')}
-           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'history' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === 'history' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
         >
            <History size={16} /> 交易紀錄
         </button>
         <button 
            onClick={() => setActiveTab('recurring')}
-           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'recurring' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === 'recurring' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
         >
            <Repeat size={16} /> 週期性設定 (自動扣款)
         </button>
@@ -498,8 +626,8 @@ export const Transactions: React.FC<TransactionsProps> = ({
               />
             </div>
             <button
-              onClick={() => setIsAdding(!isAdding)}
-              className="relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium shadow-[0_0_15px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.6)] transition-all overflow-hidden group bg-cyan-600 text-white hover:bg-cyan-500"
+              onClick={() => { setIsAdding(!isAdding); setEditingId(null); }}
+              className="relative w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium shadow-[0_0_15px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.6)] transition-all overflow-hidden group bg-cyan-600 text-white hover:bg-cyan-500"
             >
               <div className="absolute top-0 left-0 w-full h-full bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.2)_50%,transparent_75%)] -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
               <Plus size={18} />
@@ -507,12 +635,12 @@ export const Transactions: React.FC<TransactionsProps> = ({
             </button>
           </div>
 
-          {/* --- ADD TRANSACTION FORM --- */}
+          {/* --- ADD/EDIT TRANSACTION FORM --- */}
           {isAdding && (
             <div className="bg-slate-900/80 backdrop-blur-md p-6 rounded-xl border border-cyan-500/30 shadow-2xl animate-fade-in-down relative overflow-hidden">
               <div className="absolute top-0 right-0 p-2 text-[10px] text-cyan-900/50 font-tech">INPUT.STREAM.ACTIVE</div>
               <h3 className="text-lg font-bold text-cyan-400 mb-4 tracking-wide font-mono border-b border-slate-800 pb-2">
-                // NEW_TRANSACTION
+                {editingId ? `// EDIT_TRANSACTION (ID: ${editingId.slice(0,4)}...)` : '// NEW_TRANSACTION'}
               </h3>
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 <div className="col-span-1">
@@ -537,7 +665,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
                       onClick={() => { setType('transfer'); setCategory(''); }}
                       className={`flex-1 py-1.5 text-xs sm:text-sm rounded-md font-medium transition-all ${type === 'transfer' ? 'bg-slate-500 text-white shadow-[0_0_10px_rgba(148,163,184,0.5)]' : 'text-slate-400 hover:text-slate-200'}`}
                     >
-                      轉帳/還款
+                      轉帳
                     </button>
                   </div>
                 </div>
@@ -661,23 +789,26 @@ export const Transactions: React.FC<TransactionsProps> = ({
 
                 <div className="md:col-span-2 lg:col-span-3 border-t border-slate-800 pt-4 mt-2">
                   <div className="flex flex-col gap-4">
-                     {/* Recurring Toggle */}
-                    <div className="flex items-center justify-between">
-                      <label className="flex items-center gap-3 cursor-pointer group">
-                        <div className={`w-10 h-6 rounded-full p-1 transition-colors duration-300 ${isRecurring ? 'bg-cyan-500' : 'bg-slate-700'}`}>
-                          <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${isRecurring ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                        </div>
-                        <span className={`text-sm font-medium transition-colors ${isRecurring ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`}>
-                          {isRecurring ? `固定每月 ${new Date(date).getDate()} 日執行` : '設為固定週期'}
-                        </span>
-                        <input type="checkbox" className="hidden" checked={isRecurring} onChange={() => setIsRecurring(!isRecurring)} />
-                      </label>
+                     {/* Recurring Toggle (Only show if Adding New) */}
+                    {!editingId && (
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-3 cursor-pointer group">
+                          <div className={`w-10 h-6 rounded-full p-1 transition-colors duration-300 ${isRecurring ? 'bg-cyan-500' : 'bg-slate-700'}`}>
+                            <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${isRecurring ? 'translate-x-4' : 'translate-x-0'}`}></div>
+                          </div>
+                          <span className={`text-sm font-medium transition-colors ${isRecurring ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`}>
+                            {isRecurring ? `固定每月 ${new Date(date).getDate()} 日執行` : '設為固定週期'}
+                          </span>
+                          <input type="checkbox" className="hidden" checked={isRecurring} onChange={() => setIsRecurring(!isRecurring)} />
+                        </label>
+                      </div>
+                    )}
 
-                      {!isRecurring && (
+                    {!isRecurring && (
                         <div className="flex gap-3 w-full sm:w-auto justify-end">
                           <button
                             type="button"
-                            onClick={() => setIsAdding(false)}
+                            onClick={resetForm}
                             className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors font-mono"
                           >
                             [取消]
@@ -686,76 +817,43 @@ export const Transactions: React.FC<TransactionsProps> = ({
                             type="submit"
                             className="px-6 py-2 text-sm font-medium text-slate-900 bg-cyan-400 hover:bg-cyan-300 rounded-lg shadow-[0_0_10px_rgba(34,211,238,0.4)] transition-all font-bold font-mono"
                           >
-                            &gt; 儲存交易
+                            &gt; {editingId ? '更新交易' : '儲存交易'}
                           </button>
                         </div>
-                      )}
-                    </div>
+                    )}
 
-                    {/* Recurring Detail Settings */}
-                    {isRecurring && (
+                    {/* Recurring Detail Settings - FIXED 2-84 COUNT ONLY */}
+                    {isRecurring && !editingId && (
                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 animate-fade-in">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                             <div>
-                                <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">REPEAT DURATION (重複次數)</label>
-                                <div className="flex gap-2">
-                                   <button
-                                      type="button"
-                                      onClick={() => setRecurringLimit('infinite')}
-                                      className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium border transition-all flex items-center justify-center gap-1
-                                         ${recurringLimit === 'infinite' 
-                                            ? 'bg-cyan-900/30 border-cyan-500 text-cyan-400' 
-                                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'}
-                                      `}
-                                   >
-                                      <Infinity size={14} /> 無限期
-                                   </button>
-                                   <button
-                                      type="button"
-                                      onClick={() => setRecurringLimit('fixed')}
-                                      className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium border transition-all flex items-center justify-center gap-1
-                                         ${recurringLimit === 'fixed' 
-                                            ? 'bg-cyan-900/30 border-cyan-500 text-cyan-400' 
-                                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'}
-                                      `}
-                                   >
-                                      <CalendarIcon size={14} /> 固定期數
-                                   </button>
-                                </div>
+                          <div>
+                             <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">
+                               REPEAT COUNT (設定期數: {typeof recurringCount === 'string' ? recurringCount : recurringCount} 期)
+                             </label>
+                             <div className="flex items-center gap-3">
+                                <input 
+                                  type="range" 
+                                  min="2" 
+                                  max="84" 
+                                  value={typeof recurringCount === 'number' ? recurringCount : 12} 
+                                  onChange={(e) => setRecurringCount(parseInt(e.target.value))}
+                                  className="flex-1 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                                />
+                                <input 
+                                  type="number" 
+                                  min="2" 
+                                  max="84" 
+                                  value={recurringCount}
+                                  onChange={(e) => setRecurringCount(e.target.value)}
+                                  className="w-16 px-2 py-1 bg-slate-800 border border-slate-600 rounded text-center text-sm font-mono focus:border-cyan-500 outline-none"
+                                />
                              </div>
-                             
-                             {recurringLimit === 'fixed' && (
-                                <div>
-                                   <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">
-                                     TOTAL COUNT ({formatDuration(recurringCount)})
-                                   </label>
-                                   <div className="flex items-center gap-3">
-                                      <input 
-                                        type="range" 
-                                        min="2" 
-                                        max="84" 
-                                        value={recurringCount} 
-                                        onChange={(e) => setRecurringCount(parseInt(e.target.value))}
-                                        className="flex-1 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                                      />
-                                      <input 
-                                        type="number" 
-                                        min="2" 
-                                        max="84" 
-                                        value={recurringCount}
-                                        onChange={(e) => setRecurringCount(parseInt(e.target.value))}
-                                        className="w-16 px-2 py-1 bg-slate-800 border border-slate-600 rounded text-center text-sm font-mono focus:border-cyan-500 outline-none"
-                                      />
-                                   </div>
-                                   <p className="text-[10px] text-slate-500 mt-1 text-right">上限 84 期 (7年)</p>
-                                </div>
-                             )}
+                             <p className="text-[10px] text-slate-500 mt-1 text-right">範圍: 2 ~ 84 期 (7年)</p>
                           </div>
                           
                           <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end gap-3">
                              <button
                                 type="button"
-                                onClick={() => setIsAdding(false)}
+                                onClick={resetForm}
                                 className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors font-mono"
                              >
                                 [取消]
@@ -826,9 +924,15 @@ export const Transactions: React.FC<TransactionsProps> = ({
                       }`}>
                         {t.type === 'expense' && '-'}{t.type === 'transfer' && ''}{t.amount.toLocaleString()}
                       </td>
-                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                      <td className="px-4 py-3 text-center whitespace-nowrap flex gap-2 justify-center">
                         <button 
-                          onClick={() => onDeleteTransaction(t.id)}
+                          onClick={() => handleEditClick(t)}
+                          className="text-slate-600 hover:text-cyan-400 transition-colors p-1 opacity-50 group-hover:opacity-100"
+                        >
+                          <Edit3 size={16} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteTransactionClick(t.id)}
                           className="text-slate-600 hover:text-rose-500 transition-colors p-1 opacity-50 group-hover:opacity-100"
                         >
                           <Trash2 size={16} />
@@ -872,7 +976,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
                              </div>
                           </div>
                           <button 
-                             onClick={() => onDeleteRecurringTransaction(rule.id)}
+                             onClick={() => handleDeleteRecurringClick(rule.id)}
                              className="text-slate-600 hover:text-rose-500 p-2 rounded-full hover:bg-slate-700/50 transition-colors"
                           >
                              <Trash2 size={16} />
@@ -1032,6 +1136,145 @@ export const Transactions: React.FC<TransactionsProps> = ({
                  CONFIRM_ADD
                </button>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Day Detail Modal --- */}
+      {selectedDateDetail && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-md p-0 sm:p-4 animate-fade-in">
+          <div className="bg-slate-900 w-full sm:max-w-md max-h-[85vh] sm:rounded-2xl rounded-t-2xl border-t sm:border border-slate-700 shadow-[0_-10px_40px_rgba(0,0,0,0.7)] flex flex-col relative overflow-hidden">
+            
+            {/* Header */}
+            <div className="p-5 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-10">
+               <div className="flex items-center justify-between mb-2">
+                 <h3 className="text-xl font-bold text-cyan-400 font-mono tracking-wide">
+                   {selectedDateDetail}
+                 </h3>
+                 <button 
+                   onClick={() => setSelectedDateDetail(null)}
+                   className="p-2 bg-slate-800 text-slate-400 rounded-full hover:text-white transition-colors"
+                 >
+                   <X size={20} />
+                 </button>
+               </div>
+               
+               {/* Daily Stats */}
+               <div className="flex gap-4 text-sm font-mono">
+                  <div className="flex flex-col">
+                     <span className="text-[10px] text-emerald-500/70 uppercase">INCOME</span>
+                     <span className="text-emerald-400 font-bold">+${dailyStats[selectedDateDetail]?.income.toLocaleString() || 0}</span>
+                  </div>
+                  <div className="flex flex-col">
+                     <span className="text-[10px] text-rose-500/70 uppercase">EXPENSE</span>
+                     <span className="text-rose-400 font-bold">-${dailyStats[selectedDateDetail]?.expense.toLocaleString() || 0}</span>
+                  </div>
+                  <div className="flex flex-col ml-auto text-right">
+                     <span className="text-[10px] text-cyan-500/70 uppercase">NET</span>
+                     <span className={`font-bold ${(dailyStats[selectedDateDetail]?.income - dailyStats[selectedDateDetail]?.expense) >= 0 ? 'text-cyan-400' : 'text-rose-400'}`}>
+                        ${((dailyStats[selectedDateDetail]?.income || 0) - (dailyStats[selectedDateDetail]?.expense || 0)).toLocaleString()}
+                     </span>
+                  </div>
+               </div>
+            </div>
+
+            {/* Transaction List for the Day */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-slate-700">
+               {/* Actual Transactions */}
+               {(transactionsByDate[selectedDateDetail]?.filter((t: any) => !t.isProjected) || []).map((t: any) => (
+                 <div key={t.id} className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50 flex flex-col gap-2 group hover:border-slate-600 transition-all">
+                    <div className="flex justify-between items-start">
+                       <div className="flex items-center gap-2">
+                          <div className={`p-2 rounded-lg ${t.type === 'income' ? 'bg-emerald-900/20 text-emerald-400' : t.type === 'expense' ? 'bg-rose-900/20 text-rose-400' : 'bg-slate-700/50 text-slate-300'}`}>
+                             {t.type === 'income' ? <ArrowUpCircle size={18} /> : t.type === 'expense' ? <ArrowDownCircle size={18} /> : <ArrowRightLeft size={18} />}
+                          </div>
+                          <div>
+                             <p className="font-bold text-slate-200 text-sm">{t.category}</p>
+                             {t.note && <p className="text-xs text-slate-500">{t.note}</p>}
+                          </div>
+                       </div>
+                       <p className={`font-mono font-bold ${t.type === 'income' ? 'text-emerald-400' : 'text-slate-200'}`}>
+                          {t.type === 'expense' && '-'}{t.amount.toLocaleString()}
+                       </p>
+                    </div>
+                    
+                    <div className="flex justify-end gap-3 mt-1 pt-2 border-t border-slate-700/30 opacity-50 group-hover:opacity-100 transition-opacity">
+                       <button 
+                          onClick={() => handleEditClick(t)}
+                          className="text-xs flex items-center gap-1 text-cyan-400 hover:text-cyan-300"
+                       >
+                          <Edit3 size={12} /> 編輯
+                       </button>
+                       <button 
+                          onClick={() => {
+                              handleDeleteTransactionClick(t.id);
+                              // Only close if it was the last item? No, keep open to see update.
+                              // Actually data updates will re-render this.
+                          }}
+                          className="text-xs flex items-center gap-1 text-rose-500 hover:text-rose-400"
+                       >
+                          <Trash2 size={12} /> 刪除
+                       </button>
+                    </div>
+                 </div>
+               ))}
+
+               {/* Projected Transactions */}
+               {(transactionsByDate[selectedDateDetail]?.filter((t: any) => t.isProjected) || []).map((t: any, idx: number) => (
+                 <div key={`proj-${idx}`} className="bg-slate-800/30 rounded-xl p-3 border border-dashed border-slate-700 flex flex-col gap-2 opacity-75">
+                    <div className="flex justify-between items-start">
+                       <div className="flex items-center gap-2">
+                          <div className="p-2 rounded-lg bg-slate-700/30 text-slate-500">
+                             <Repeat size={18} />
+                          </div>
+                          <div>
+                             <p className="font-bold text-slate-400 text-sm flex items-center gap-2">
+                                {t.category} 
+                                <span className="text-[9px] bg-slate-700 px-1 rounded text-slate-300">未來預計</span>
+                             </p>
+                             <p className="text-xs text-slate-600">由循環設定自動產生</p>
+                          </div>
+                       </div>
+                       <p className="font-mono font-bold text-slate-500">
+                          ${t.amount.toLocaleString()}
+                       </p>
+                    </div>
+                    <div className="flex justify-end gap-3 mt-1 pt-2 border-t border-slate-700/30">
+                       <button 
+                          onClick={() => {
+                             setActiveTab('recurring');
+                             setSelectedDateDetail(null);
+                          }}
+                          className="text-xs flex items-center gap-1 text-slate-400 hover:text-cyan-400"
+                       >
+                          <Settings size={12} /> 管理循環設定
+                       </button>
+                    </div>
+                 </div>
+               ))}
+
+               {(!transactionsByDate[selectedDateDetail] || transactionsByDate[selectedDateDetail].length === 0) && (
+                  <div className="text-center py-8 text-slate-500 font-mono text-sm">
+                     &lt; 本日無交易紀錄 /&gt;
+                  </div>
+               )}
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/80 pb-safe">
+               <button 
+                 onClick={() => {
+                    setDate(selectedDateDetail);
+                    setSelectedDateDetail(null);
+                    setEditingId(null);
+                    setIsAdding(true);
+                 }}
+                 className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold font-mono flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+               >
+                 <Plus size={18} /> 新增今日交易
+               </button>
+            </div>
+
           </div>
         </div>
       )}

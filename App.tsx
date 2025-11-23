@@ -123,7 +123,8 @@ function App() {
           sourceId: rule.sourceId,
           sourceType: rule.sourceType,
           destinationId: rule.destinationId,
-          destinationType: rule.destinationType
+          destinationType: rule.destinationType,
+          recurringRuleId: rule.id // Link back to rule
         };
         newTransactions.push(newTxn);
 
@@ -249,6 +250,58 @@ function App() {
     }));
   };
 
+  const handleUpdateTransaction = (updatedT: Transaction) => {
+    // First delete the old one (reverse its effect)
+    const oldT = data.transactions.find(t => t.id === updatedT.id);
+    if (!oldT) return;
+
+    let newAssets = [...data.assets];
+    let newLiabilities = [...data.liabilities];
+
+    // 1. Revert Old Transaction
+    const revert = (t: Transaction) => {
+        if (t.type === 'income') {
+           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+        } else if (t.type === 'expense') {
+           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+        } else if (t.type === 'transfer') {
+           // Reverse Source
+           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+           // Reverse Dest
+           if (t.destinationType === 'asset') updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, -t.amount);
+           else updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, t.amount);
+        }
+    };
+    revert(oldT);
+
+    // 2. Apply New Transaction
+    const apply = (t: Transaction) => {
+        if (t.type === 'income') {
+           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+        } else if (t.type === 'expense') {
+           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+        } else if (t.type === 'transfer') {
+           if (t.sourceType === 'asset') updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, -t.amount);
+           else updateBalance(newAssets, newLiabilities, t.sourceId, t.sourceType, t.amount);
+           if (t.destinationType === 'asset') updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, t.amount);
+           else updateBalance(newAssets, newLiabilities, t.destinationId, t.destinationType, -t.amount);
+        }
+    };
+    apply(updatedT);
+
+    setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.map(t => t.id === updatedT.id ? updatedT : t),
+        assets: newAssets,
+        liabilities: newLiabilities
+    }));
+  };
+
   const handleDeleteTransaction = (id: string) => {
     const transaction = data.transactions.find(t => t.id === id);
     if (!transaction) return;
@@ -334,9 +387,53 @@ function App() {
     }));
   };
 
-  const handleDeleteRecurringTransaction = (id: string) => {
+  // Enhanced delete handler that supports deleting history
+  const handleDeleteRecurringTransaction = (id: string, deleteAllHistory: boolean) => {
+    let newAssets = [...data.assets];
+    let newLiabilities = [...data.liabilities];
+    let updatedTransactions = [...data.transactions];
+
+    if (deleteAllHistory) {
+      // Find all transactions linked to this rule
+      const linkedTransactions = updatedTransactions.filter(t => t.recurringRuleId === id);
+
+      // Revert balances for all of them
+      linkedTransactions.forEach(transaction => {
+        if (transaction.type === 'income') {
+           if (transaction.sourceType === 'asset') {
+              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
+           } else {
+              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
+           }
+        } else if (transaction.type === 'expense') {
+           if (transaction.sourceType === 'asset') {
+              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
+           } else {
+              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
+           }
+        } else if (transaction.type === 'transfer') {
+           if (transaction.sourceType === 'asset') {
+              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, transaction.amount);
+           } else {
+              updateBalance(newAssets, newLiabilities, transaction.sourceId, transaction.sourceType, -transaction.amount);
+           }
+           if (transaction.destinationType === 'asset') {
+              updateBalance(newAssets, newLiabilities, transaction.destinationId, transaction.destinationType, -transaction.amount);
+           } else {
+              updateBalance(newAssets, newLiabilities, transaction.destinationId, transaction.destinationType, transaction.amount);
+           }
+        }
+      });
+
+      // Filter them out
+      updatedTransactions = updatedTransactions.filter(t => t.recurringRuleId !== id);
+    }
+
     setData(prev => ({
       ...prev,
+      transactions: updatedTransactions,
+      assets: newAssets,
+      liabilities: newLiabilities,
       recurringTransactions: (prev.recurringTransactions || []).filter(r => r.id !== id)
     }));
   };
@@ -494,7 +591,7 @@ function App() {
       </header>
 
       {/* Main Content (Scrollable Area) */}
-      <main className="flex-1 overflow-y-auto max-w-5xl w-full mx-auto p-4 md:p-8 pt-6 pb-24 md:pb-8 relative z-10 scrollbar-none">
+      <main className="flex-1 overflow-y-auto max-w-5xl w-full mx-auto p-4 md:p-8 pt-6 pb-28 md:pb-8 relative z-10 scrollbar-none">
         <header className="mb-8 hidden md:block border-b border-slate-800 pb-4">
           <h2 className="text-3xl font-bold text-slate-100 tracking-tight font-mono">
              <span className="text-cyan-500 mr-2">&gt;</span> 
@@ -513,6 +610,7 @@ function App() {
             customCategories={data.customCategories || []}
             recurringTransactions={data.recurringTransactions || []}
             onAddTransaction={handleAddTransaction}
+            onUpdateTransaction={handleUpdateTransaction}
             onDeleteTransaction={handleDeleteTransaction}
             onAddCustomCategory={handleAddCustomCategory}
             onAddRecurringTransaction={handleAddRecurringTransaction}
@@ -537,7 +635,7 @@ function App() {
       </main>
 
       {/* Bottom Navigation (Mobile) - Fixed at bottom */}
-      <nav className="md:hidden flex-none bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-30 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.5)]">
+      <nav className="md:hidden flex-none bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-30 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.5)] fixed bottom-0 left-0 w-full">
         <div className="flex justify-around p-2">
           {navItems.map(item => (
             <button

@@ -16,6 +16,9 @@ export interface Transaction {
   // Destination (To) - Only for transfers
   destinationId?: string;
   destinationType?: 'asset' | 'liability';
+
+  // Link to parent recurring rule
+  recurringRuleId?: string;
 }
 
 export interface RecurringTransaction {
