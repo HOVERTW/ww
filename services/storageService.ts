@@ -1,10 +1,18 @@
+
 import { FinancialData, Transaction, Asset, Liability } from "../types";
 
 const STORAGE_KEY = 'wealthwise_data_v1';
 
 const INITIAL_DATA: FinancialData = {
   transactions: [],
-  assets: [],
+  assets: [
+    {
+      id: 'init_default_cash',
+      name: '現金 (預設)',
+      type: 'cash',
+      value: 10000
+    }
+  ],
   liabilities: [],
   recurringTransactions: []
 };

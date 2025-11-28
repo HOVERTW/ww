@@ -1,21 +1,23 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Asset, Liability, AssetType, LiabilityType } from '../types';
 import { generateId } from '../services/storageService';
 import { getStockPrice, getExchangeRate } from '../services/geminiService';
-import { Plus, Trash2, Building2, Briefcase, Wallet, CreditCard, DollarSign, Edit2, RefreshCw, TrendingUp, TrendingDown, Search, Globe, Bitcoin, LineChart, Zap, Shield } from 'lucide-react';
+import { Plus, Trash2, Building2, Briefcase, Wallet, CreditCard, DollarSign, Edit2, RefreshCw, TrendingUp, TrendingDown, Search, Globe, Bitcoin, LineChart, Zap, Shield, Loader2, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface BalanceSheetProps {
   assets: Asset[];
   liabilities: Liability[];
   onUpdateAsset: (a: Asset) => void;
   onDeleteAsset: (id: string) => void;
+  onReorderAsset: (index: number, direction: 'up' | 'down') => void;
   onUpdateLiability: (l: Liability) => void;
   onDeleteLiability: (id: string) => void;
+  onReorderLiability: (index: number, direction: 'up' | 'down') => void;
 }
 
 export const BalanceSheet: React.FC<BalanceSheetProps> = ({ 
-  assets, liabilities, onUpdateAsset, onDeleteAsset, onUpdateLiability, onDeleteLiability 
+  assets, liabilities, onUpdateAsset, onDeleteAsset, onReorderAsset, onUpdateLiability, onDeleteLiability, onReorderLiability 
 }) => {
   
   // -- Asset Form State --
@@ -29,7 +31,7 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
   
   // Price & FX State
   const [currency, setCurrency] = useState<'TWD' | 'USD'>('TWD');
-  const [purchasePrice, setPurchasePrice] = useState(''); // Original Currency
+  const [purchasePrice, setPurchasePrice] = useState(''); // Original Currency (or Total Cost for property/other)
   const [currentPrice, setCurrentPrice] = useState('');   // Original Currency
   const [purchaseExchangeRate, setPurchaseExchangeRate] = useState('');
   const [currentExchangeRate, setCurrentExchangeRate] = useState('');
@@ -38,6 +40,10 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
   const [isFetchingFX, setIsFetchingFX] = useState(false);
   const [showAssetForm, setShowAssetForm] = useState(false);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  
+  // Auto-refresh state
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const hasRefreshedRef = useRef(false);
 
   // -- Liability Form State --
   const [liabilityName, setLiabilityName] = useState('');
@@ -45,6 +51,82 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
   const [liabilityType, setLiabilityType] = useState<LiabilityType>('credit_card');
   const [showLiabilityForm, setShowLiabilityForm] = useState(false);
   const [editingLiabilityId, setEditingLiabilityId] = useState<string | null>(null);
+
+  // --- Auto Refresh Logic on Mount ---
+  useEffect(() => {
+    const refreshPrices = async () => {
+      // Prevent double firing in strict mode or rapid re-renders
+      if (hasRefreshedRef.current) return;
+      hasRefreshedRef.current = true;
+
+      const investmentAssets = assets.filter(a => 
+        ['tw_stock', 'us_stock', 'crypto'].includes(a.type) && a.symbol && a.shares
+      );
+
+      if (investmentAssets.length === 0) return;
+
+      setIsAutoRefreshing(true);
+
+      // We use a map to store updates to avoid race conditions with multiple async state updates
+      const updates: Asset[] = [];
+
+      // Create a promise for each asset to fetch data in parallel
+      const updatePromises = investmentAssets.map(async (asset) => {
+        try {
+           if (!asset.symbol) return;
+           const marketData = await getStockPrice(asset.symbol);
+           
+           if (marketData) {
+             let newFx = asset.currentExchangeRate || 1;
+             
+             // Update FX if it's a USD asset
+             if (marketData.currency === 'USD') {
+                if (marketData.estimatedFxRate) {
+                   newFx = marketData.estimatedFxRate;
+                } else {
+                   // Fallback if stock api didn't return FX
+                   const fx = await getExchangeRate('USD', 'TWD');
+                   if (fx) newFx = fx;
+                }
+             } else {
+               // Ensure TWD is 1
+               newFx = 1;
+             }
+
+             // Calculate new TWD Value
+             const newPrice = marketData.price;
+             const shares = asset.shares || 0;
+             const newValueTWD = Math.round(shares * newPrice * newFx);
+
+             // Only update if value or price changed to avoid unnecessary writes
+             if (newValueTWD !== asset.value || newPrice !== asset.currentPrice) {
+               updates.push({
+                 ...asset,
+                 currentPrice: newPrice,
+                 currentExchangeRate: newFx,
+                 value: newValueTWD,
+                 lastUpdated: new Date().toISOString()
+               });
+             }
+           }
+        } catch (e) {
+          console.error(`Failed to auto-update ${asset.symbol}`, e);
+        }
+      });
+
+      await Promise.all(updatePromises);
+
+      // Apply updates
+      updates.forEach(updatedAsset => {
+        onUpdateAsset(updatedAsset);
+      });
+
+      setIsAutoRefreshing(false);
+    };
+
+    refreshPrices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
 
   // --- Auto Set Currency based on Type ---
   useEffect(() => {
@@ -107,9 +189,10 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
 
   // Auto calculate total value (TWD) when inputs change
   useEffect(() => {
-    const isInvestment = ['tw_stock', 'us_stock', 'crypto', 'investment'].includes(assetType);
+    // Only auto-calc for stocks/crypto where we have shares * unit price
+    const isUnitBasedInvestment = ['tw_stock', 'us_stock', 'crypto'].includes(assetType);
     
-    if (isInvestment && shares && currentPrice) {
+    if (isUnitBasedInvestment && shares && currentPrice) {
        const price = parseFloat(currentPrice);
        const qty = parseFloat(shares);
        
@@ -128,16 +211,23 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
     const newAsset: Asset = {
       id: editingAssetId || generateId(),
       name: assetName,
-      value: parseFloat(assetValue), // This is the Final TWD Value
+      value: parseFloat(assetValue), // This is the Final TWD Value (Current Market Value)
       type: assetType,
     };
 
-    // Add investment details if applicable
-    if (['tw_stock', 'us_stock', 'crypto', 'investment'].includes(assetType)) {
-      newAsset.symbol = symbol.toUpperCase();
+    // Add investment/property details if applicable
+    if (['tw_stock', 'us_stock', 'crypto', 'property', 'other'].includes(assetType)) {
+      newAsset.symbol = symbol ? symbol.toUpperCase() : undefined;
       newAsset.shares = shares ? parseFloat(shares) : undefined;
+      
+      // For property/other: purchasePrice is the "Original Total Cost"
+      // For stocks: purchasePrice is "Unit Cost"
       newAsset.purchasePrice = purchasePrice ? parseFloat(purchasePrice) : undefined;
+      
+      // For stock: currentPrice is unit price. 
+      // For property/other: currentPrice isn't strictly needed as 'value' holds total, but we can clear it.
       newAsset.currentPrice = currentPrice ? parseFloat(currentPrice) : undefined;
+      
       newAsset.currency = currency;
       
       if (currency === 'USD') {
@@ -228,7 +318,6 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
       case 'tw_stock': return <LineChart size={18} />;
       case 'us_stock': return <Globe size={18} />;
       case 'crypto': return <Bitcoin size={18} />;
-      case 'investment': return <Briefcase size={18} />;
       case 'insurance': return <Shield size={18} />;
       case 'cash': return <Wallet size={18} />;
       default: return <DollarSign size={18} />;
@@ -241,10 +330,11 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
           case 'tw_stock': return '台股';
           case 'us_stock': return '美股';
           case 'crypto': return '加密貨幣';
-          case 'investment': return '其他投資';
           case 'insurance': return '保險';
           case 'property': return '不動產';
           case 'other': return '其他';
+          // @ts-ignore - Handle legacy data if present
+          case 'investment': return '其他投資 (舊)';
           default: return type;
       }
   }
@@ -257,7 +347,7 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
           case 'crypto': return '例如：Binance BTC、冷錢包 ETH、USDT...';
           case 'property': return '例如：台北市大安區公寓、台中土地...';
           case 'insurance': return '例如：儲蓄險保單價值、投資型保單現值...';
-          case 'other': return '例如：汽車、借出款項...';
+          case 'other': return '例如：汽車、借出款項、收藏品...';
           default: return '資產名稱';
       }
   }
@@ -273,63 +363,79 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
   }
 
   const renderInvestmentDetails = (asset: Asset) => {
-    const isInvest = ['tw_stock', 'us_stock', 'crypto', 'investment'].includes(asset.type);
-    if (!isInvest || !asset.shares || !asset.currentPrice || !asset.purchasePrice) return null;
+    const isManualValuation = asset.type === 'property' || asset.type === 'other';
+    // Legacy support
+    const isLegacyInvestment = (asset.type as any) === 'investment';
     
-    const isForeign = asset.currency === 'USD' || asset.type === 'us_stock' || asset.type === 'crypto';
+    if (!asset.purchasePrice && !asset.value) return null;
     
-    // Calculate Cost in TWD (Using Purchase FX)
-    const purchaseFx = asset.purchaseExchangeRate || 1;
-    const costTWD = asset.shares * asset.purchasePrice * purchaseFx;
-    
-    // Calculate Current Market Value in TWD (Using Current FX)
-    const currentFx = asset.currentExchangeRate || 1;
-    const marketValueTWD = asset.shares * asset.currentPrice * currentFx;
-    
-    // Total Profit/Loss (Price Diff + FX Diff)
+    let costTWD = 0;
+    let marketValueTWD = 0;
+    let isForeign = false;
+    let purchaseFx = asset.purchaseExchangeRate || 1;
+    let currentFx = asset.currentExchangeRate || 1;
+
+    if (isManualValuation || (isLegacyInvestment && !asset.shares)) {
+       costTWD = asset.purchasePrice || 0;
+       marketValueTWD = asset.value;
+    } else {
+       if (!asset.shares || !asset.currentPrice) return null;
+       isForeign = asset.currency === 'USD' || asset.type === 'us_stock' || asset.type === 'crypto';
+       costTWD = asset.shares * asset.purchasePrice * purchaseFx;
+       marketValueTWD = asset.shares * asset.currentPrice * currentFx;
+    }
+
     const profitLossTWD = marketValueTWD - costTWD;
     const percent = costTWD !== 0 ? (profitLossTWD / costTWD) * 100 : 0;
     const isProfit = profitLossTWD >= 0;
 
     return (
-      <div className="mt-2 bg-slate-900/40 p-3 rounded border border-slate-700/50">
-         <div className="grid grid-cols-2 sm:grid-cols-4 gap-y-3 gap-x-4 text-xs font-mono">
-            <div className="flex flex-col">
-              <span className="text-slate-500">持有數量</span>
-              <span className="text-slate-300 font-bold">{asset.shares}</span>
+      <div className="mt-2 bg-slate-900/40 p-2 sm:p-3 rounded border border-slate-700/50">
+         {/* Top Row: Shares (if exists) - Full width for clean look */}
+         {!isManualValuation && asset.shares && (
+            <div className="mb-2 pb-1 border-b border-slate-800/50 flex justify-between items-center">
+                <span className="text-[10px] text-slate-500 font-mono tracking-wider">持有數量 (SHARES)</span>
+                <span className="text-xs text-slate-300 font-bold font-mono">{asset.shares}</span>
             </div>
-            
-            <div className="flex flex-col">
-              <span className="text-slate-500">原始成本 (TWD)</span>
-              <span className="text-slate-400">
+         )}
+
+         {/* 3-Column Grid Layout */}
+         <div className="grid grid-cols-3 gap-2">
+            {/* Cost Column */}
+            <div className="flex flex-col justify-center">
+              <span className="text-[9px] text-slate-600 mb-0.5 font-mono">原始成本</span>
+              <span className="text-xs text-slate-400 font-mono tracking-tight">
                  ${Math.round(costTWD).toLocaleString()}
               </span>
-              <span className="text-[10px] text-slate-600">
-                 (@ {isForeign ? '$' : 'NT$'}{asset.purchasePrice.toLocaleString()} × {purchaseFx})
-              </span>
             </div>
 
-            <div className="flex flex-col">
-              <span className="text-slate-500">當前價值 (TWD)</span>
-              <span className="text-slate-200 font-bold">
+            {/* Value Column (Center, Highlighted) */}
+            <div className="flex flex-col justify-center text-center border-x border-slate-800/50 px-1 relative">
+               <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent opacity-50"></div>
+               <span className="text-[9px] text-cyan-500/70 mb-0.5 font-mono">當前市值</span>
+               <span className="text-sm text-slate-200 font-bold font-mono tracking-tight">
                  ${Math.round(marketValueTWD).toLocaleString()}
-              </span>
-              <span className="text-[10px] text-cyan-600/70">
-                 (@ {isForeign ? '$' : 'NT$'}{asset.currentPrice.toLocaleString()} × {currentFx})
-              </span>
+               </span>
             </div>
 
-            <div className="flex flex-col items-end justify-center bg-slate-800/30 rounded p-1">
-               <span className="text-[10px] text-slate-500 mb-0.5">總損益 (含匯差)</span>
-               <span className={`font-bold text-sm flex items-center gap-1 ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {isProfit ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                  {percent.toFixed(2)}%
-               </span>
-               <span className={`text-xs ${isProfit ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {isProfit ? '+' : ''}${Math.round(profitLossTWD).toLocaleString()}
-               </span>
+            {/* P/L Column (Right) */}
+            <div className="flex flex-col justify-center text-right">
+               <span className="text-[9px] text-slate-600 mb-0.5 font-mono">總損益</span>
+               <div className={`flex flex-col items-end leading-none ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <span className="text-xs font-bold font-mono mb-0.5">{isProfit ? '+' : ''}{percent.toFixed(1)}%</span>
+                  <span className="text-[10px] opacity-80 font-mono">
+                    {Math.round(profitLossTWD).toLocaleString()}
+                  </span>
+               </div>
             </div>
          </div>
+         
+         {/* Footer info for foreign assets */}
+         {!isManualValuation && isForeign && (
+            <div className="text-[9px] text-slate-600/50 text-center mt-2 font-mono pt-1 border-t border-slate-800/30">
+               即時匯率: {currentFx} | 成本匯率: {purchaseFx}
+            </div>
+         )}
       </div>
     );
   };
@@ -339,17 +445,25 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
       {/* ASSETS COLUMN */}
       <div className="space-y-4">
         <div className="flex justify-between items-end border-b border-emerald-500/30 pb-2">
-          <h2 className="text-xl font-bold text-emerald-400 tracking-wide flex items-center gap-2">
-             <span className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
-             資產 (ASSETS)
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold text-emerald-400 tracking-wide flex items-center gap-2">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+              資產 (ASSETS)
+            </h2>
+            {isAutoRefreshing && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-900/30 border border-emerald-500/20 text-[10px] text-emerald-400 font-mono animate-pulse">
+                <Loader2 size={10} className="animate-spin" />
+                SYNCING...
+              </div>
+            )}
+          </div>
           <span className="text-emerald-400 font-bold text-xl font-mono drop-shadow-[0_0_5px_rgba(16,185,129,0.4)]">
               ${totalAssets.toLocaleString()} <span className="text-xs text-emerald-600 ml-1">TWD</span>
           </span>
         </div>
 
         <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl border border-emerald-500/20 shadow-lg overflow-hidden">
-          {assets.map(item => (
+          {assets.map((item, index) => (
             <div key={item.id} className="p-4 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 group transition-all">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -367,12 +481,27 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
                 <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
                   <div className="text-right">
                     <span className="font-semibold text-emerald-100 font-mono text-lg">${item.value.toLocaleString()}</span>
-                    {(item.currency === 'USD' || item.type === 'us_stock' || item.type === 'crypto') && (
-                      <p className="text-[10px] text-slate-500 font-mono text-right">TWD Eq.</p>
-                    )}
                   </div>
                   
-                  <div className="flex gap-1 flex-col sm:flex-row">
+                  <div className="flex items-center gap-1">
+                      {/* Reorder Buttons */}
+                      <div className="flex flex-col mr-1 opacity-40 group-hover:opacity-100 transition-opacity">
+                        <button 
+                           onClick={() => onReorderAsset(index, 'up')} 
+                           disabled={index === 0}
+                           className="text-slate-500 hover:text-cyan-400 disabled:opacity-20 disabled:hover:text-slate-500"
+                        >
+                           <ChevronUp size={14} />
+                        </button>
+                        <button 
+                           onClick={() => onReorderAsset(index, 'down')} 
+                           disabled={index === assets.length - 1}
+                           className="text-slate-500 hover:text-cyan-400 disabled:opacity-20 disabled:hover:text-slate-500"
+                        >
+                           <ChevronDown size={14} />
+                        </button>
+                      </div>
+
                       <button onClick={() => handleEditAsset(item)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1 opacity-60 group-hover:opacity-100">
                           <Edit2 size={16} />
                       </button>
@@ -415,13 +544,53 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
                     <option value="crypto">加密貨幣 (Crypto)</option>
                     <option value="insurance">保險 (Insurance)</option>
                     <option value="property">不動產 (Real Estate)</option>
-                    <option value="investment">其他投資 (Other Investment)</option>
+                    {/* Investment removed as requested */}
                     <option value="other">其他 (Other)</option>
                   </select>
                </div>
 
-               {/* Investment Specific Fields */}
-               {['tw_stock', 'us_stock', 'crypto', 'investment'].includes(assetType) && (
+               {/* Manual Valuation Fields (Property OR Other) */}
+               {(assetType === 'property' || assetType === 'other') && (
+                 <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 grid grid-cols-2 gap-3 animate-fade-in">
+                    <div className="col-span-2 text-[10px] text-emerald-500/70 font-mono mb-1">
+                       [資產估值設定]
+                    </div>
+                    <div>
+                       <label className="text-[10px] text-slate-400 mb-1 block">成本 (Cost / TWD)</label>
+                       <div className="relative">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs">$</span>
+                          <input 
+                            type="number"
+                            step="any"
+                            className="w-full pl-5 pr-2 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm font-mono focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none" 
+                            placeholder="購入金額" 
+                            value={purchasePrice} 
+                            onChange={e => setPurchasePrice(e.target.value)}
+                          />
+                       </div>
+                    </div>
+                    <div>
+                       <label className="text-[10px] text-cyan-400 mb-1 block">當前市值 (Current Value / TWD)</label>
+                        <div className="relative">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-cyan-500/50 text-xs">$</span>
+                          <input 
+                            type="number"
+                            step="any"
+                            className="w-full pl-5 pr-2 py-2 bg-slate-800 border border-cyan-500/30 rounded-lg text-cyan-300 text-sm font-mono shadow-[inset_0_0_5px_rgba(6,182,212,0.1)] focus:border-cyan-500 outline-none" 
+                            placeholder="當前市值" 
+                            value={assetValue} 
+                            onChange={e => setAssetValue(e.target.value)}
+                          />
+                       </div>
+                    </div>
+                    <div className="col-span-2 text-[9px] text-slate-500 mt-1">
+                       * 系統將自動計算此資產的總損益與 ROI (投報率)。
+                    </div>
+                 </div>
+               )}
+
+               {/* Stock/Crypto Specific Fields */}
+               {['tw_stock', 'us_stock', 'crypto'].includes(assetType) && (
                  <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 grid grid-cols-2 gap-3 animate-fade-in">
                     <div className="col-span-2">
                        <label className="text-[10px] text-slate-400 mb-1 block">代號 (SYMBOL) - 自動查價</label>
@@ -539,7 +708,7 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
                  </div>
                )}
 
-               {/* Generic Fields */}
+               {/* Generic Fields (Name) */}
                <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2">
                     <label className="text-[10px] text-slate-400 mb-1 block">名稱 / 帳戶名 (NAME)</label>
@@ -552,7 +721,8 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
                     />
                   </div>
                   
-                  <div className="col-span-2">
+                  {/* Generic Final Value Input - Hidden for Property/Other (using specific block) or Stocks (calculated) */}
+                  <div className={(assetType === 'property' || assetType === 'other') ? 'hidden' : 'col-span-2'}>
                     <label className="text-[10px] text-slate-400 mb-1 block">最終台幣總價值 (TWD)</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">NT$</span>
@@ -563,7 +733,7 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
                         value={assetValue} 
                         onChange={e => setAssetValue(e.target.value)}
                         readOnly={['tw_stock','us_stock','crypto'].includes(assetType) && !!(shares && currentPrice)}
-                        required
+                        required={assetType !== 'property' && assetType !== 'other'} 
                       />
                     </div>
                     {currency === 'USD' && (
@@ -605,7 +775,7 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
         </div>
 
         <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl border border-rose-500/20 shadow-lg overflow-hidden">
-          {liabilities.map(item => (
+          {liabilities.map((item, index) => (
             <div key={item.id} className="flex items-center justify-between gap-2 p-4 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 group transition-all">
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div className="p-2 bg-rose-900/20 text-rose-400 rounded-lg border border-rose-500/20 flex-shrink-0">
@@ -618,7 +788,25 @@ export const BalanceSheet: React.FC<BalanceSheetProps> = ({
               </div>
               <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
                 <span className="font-semibold text-rose-100 font-mono">${item.value.toLocaleString()}</span>
-                <div className="flex gap-1">
+                <div className="flex items-center gap-1">
+                    {/* Reorder Buttons */}
+                    <div className="flex flex-col mr-1 opacity-40 group-hover:opacity-100 transition-opacity">
+                      <button 
+                          onClick={() => onReorderLiability(index, 'up')} 
+                          disabled={index === 0}
+                          className="text-slate-500 hover:text-rose-400 disabled:opacity-20 disabled:hover:text-slate-500"
+                      >
+                          <ChevronUp size={14} />
+                      </button>
+                      <button 
+                          onClick={() => onReorderLiability(index, 'down')} 
+                          disabled={index === liabilities.length - 1}
+                          className="text-slate-500 hover:text-rose-400 disabled:opacity-20 disabled:hover:text-slate-500"
+                      >
+                          <ChevronDown size={14} />
+                      </button>
+                    </div>
+
                     <button onClick={() => handleEditLiability(item)} className="text-slate-600 hover:text-rose-400 transition-colors p-1 opacity-60 group-hover:opacity-100">
                         <Edit2 size={16} />
                     </button>

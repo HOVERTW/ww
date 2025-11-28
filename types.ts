@@ -43,10 +43,13 @@ export interface RecurringTransaction {
   lastProcessedDate?: string;
   active: boolean;
   remainingOccurrences?: number; // If defined, stops after 0. If undefined, runs forever.
+  
+  // New: Track specific dates that were deleted/skipped by the user
+  skippedDates?: string[];
 }
 
-// Updated AssetType to distinguish markets and include insurance
-export type AssetType = 'cash' | 'tw_stock' | 'us_stock' | 'crypto' | 'property' | 'investment' | 'insurance' | 'other';
+// Updated AssetType: Removed 'investment', 'other' now uses cost/value logic
+export type AssetType = 'cash' | 'tw_stock' | 'us_stock' | 'crypto' | 'property' | 'insurance' | 'other';
 export type LiabilityType = 'credit_card' | 'loan' | 'mortgage' | 'other';
 
 export interface Asset {

@@ -5,12 +5,12 @@ import { generateId } from '../services/storageService';
 import { suggestCategoryIcons } from '../services/geminiService';
 import * as LucideIcons from 'lucide-react';
 import { 
-  Plus, Trash2, Search, ChevronLeft, ChevronRight, 
+  Plus, Trash2, Search, ChevronLeft, ChevronRight, ChevronDown,
   Calendar as CalendarIcon, CreditCard, Utensils, Coffee, Bus, ShoppingBag, 
   Home, Gamepad2, Heart, GraduationCap, Users, FileText, TrendingDown, Shield, 
   Cat, Briefcase, Award, TrendingUp, PieChart, Clock, Building, Gift, RotateCcw, 
   MoreHorizontal, Smartphone, Plane, Wrench, Landmark, Baby, Edit3, RefreshCw, X,
-  Repeat, Clock4, FilterX, AlertTriangle, Archive, ArrowRightLeft
+  Repeat, Clock4, FilterX, AlertTriangle, Archive, ArrowRightLeft, Sparkles
 } from 'lucide-react';
 
 interface TransactionsProps {
@@ -24,7 +24,7 @@ interface TransactionsProps {
   onDeleteTransaction: (id: string) => void;
   onAddCustomCategory: (c: CustomCategory) => void;
   onAddRecurringTransaction: (r: RecurringTransaction) => void;
-  onDeleteRecurringTransaction: (id: string, deleteAllHistory: boolean) => void;
+  onDeleteRecurringTransaction: (id: string, deleteStrategy: 'all' | 'future' | 'none', fromDate?: string) => void;
 }
 
 // Define Category Lists with Icons
@@ -88,6 +88,14 @@ const formatCompactAmount = (num: number) => {
   return `${(num / 1000000).toFixed(1)}M`;
 };
 
+// Helper: Get Local Date String (YYYY-MM-DD) to prevent timezone shifts
+const getLocalDateString = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const Transactions: React.FC<TransactionsProps> = ({ 
   transactions, assets, liabilities, customCategories, recurringTransactions,
   onAddTransaction, onUpdateTransaction, onDeleteTransaction, onAddCustomCategory,
@@ -99,6 +107,10 @@ export const Transactions: React.FC<TransactionsProps> = ({
   // Calendar State
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  
+  // Date Picker Modal State
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
 
   // Transaction Form State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -106,7 +118,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
   const [note, setNote] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getLocalDateString(new Date()));
   
   const [sourceId, setSourceId] = useState('');
   const [destinationId, setDestinationId] = useState('');
@@ -154,9 +166,15 @@ export const Transactions: React.FC<TransactionsProps> = ({
         return;
     }
     
+    // VALIDATION: Force account selection for all types
+    if (!sourceId) {
+        alert('請選擇帳戶 (ACCOUNT)');
+        return;
+    }
+    
     if (type === 'transfer') {
-        if (!sourceId || !destinationId) {
-          alert('轉帳必須選擇「來源帳戶」與「轉入帳戶」');
+        if (!destinationId) {
+          alert('轉帳必須選擇「轉入帳戶」');
           return;
         }
         if (sourceId === destinationId) {
@@ -199,7 +217,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
        if (isDueTodayOrPast) {
          const d = new Date(date);
          d.setMonth(d.getMonth() + 1);
-         nextDue = d.toISOString().split('T')[0];
+         nextDue = getLocalDateString(d);
        }
        
        const newRuleId = generateId();
@@ -218,7 +236,8 @@ export const Transactions: React.FC<TransactionsProps> = ({
           dayOfMonth,
           nextDueDate: nextDue, 
           active: true,
-          remainingOccurrences: remaining
+          remainingOccurrences: remaining,
+          skippedDates: []
        };
 
        if (remaining >= 0) {
@@ -311,44 +330,47 @@ export const Transactions: React.FC<TransactionsProps> = ({
   const handleConfirmDelete = (mode: 'single' | 'future') => {
     if (!deleteModal) return;
     const { type, data } = deleteModal;
+    const ruleId = data.recurringRuleId || (type === 'projected' ? data.id : null);
+    const originalRule = recurringTransactions.find(r => r.id === ruleId);
 
     if (mode === 'single') {
-        // "Delete This Occurrence" (Skip)
+        // Option 1: 刪除該次交易
         if (type === 'real') {
-            // If it's real, we just delete it. The rule has already moved on.
             onDeleteTransaction(data.id);
         } else {
-            // If it's projected, we update the rule to start NEXT month
-            const currentTargetDate = new Date(data.date);
-            const nextDate = new Date(currentTargetDate);
-            nextDate.setMonth(nextDate.getMonth() + 1);
-            
-            // We need to find the original rule to preserve its other props
-            const originalRule = recurringTransactions.find(r => r.id === (data.recurringRuleId || data.id));
             if (originalRule) {
+                const dateToSkip = data.date; 
                 const updatedRule: RecurringTransaction = {
                     ...originalRule,
-                    nextDueDate: nextDate.toISOString().split('T')[0],
-                    // Decrease occurrences if it's limited? 
-                    // Usually skip means we consumed one occurrence without logging it, or we just push the date?
-                    // Let's assume we just push the date and decrease remaining count to effectively "skip and burn".
-                    remainingOccurrences: originalRule.remainingOccurrences !== undefined 
-                        ? Math.max(0, originalRule.remainingOccurrences - 1) 
-                        : undefined
+                    skippedDates: [...(originalRule.skippedDates || []), dateToSkip]
                 };
                 onAddRecurringTransaction(updatedRule);
             }
         }
     } else if (mode === 'future') {
-        // "Delete This and All Future" (Stop)
+        // Option 2: 刪除這次之後的所有交易
         if (type === 'real') {
-            onDeleteTransaction(data.id);
-            if (data.recurringRuleId) {
-                onDeleteRecurringTransaction(data.recurringRuleId, false);
-            }
+             onDeleteTransaction(data.id);
+             if (originalRule) {
+                 onAddRecurringTransaction({ ...originalRule, active: false });
+             }
         } else {
-            // Projected items use the rule ID as ID usually, or we passed recurringRuleId
-            onDeleteRecurringTransaction(data.recurringRuleId || data.id, false);
+            if (originalRule) {
+                const nextDue = new Date(originalRule.nextDueDate);
+                const selectedDate = new Date(data.date);
+                
+                const monthsDiff = (selectedDate.getFullYear() - nextDue.getFullYear()) * 12 + 
+                                   (selectedDate.getMonth() - nextDue.getMonth());
+                
+                if (monthsDiff <= 0) {
+                    onAddRecurringTransaction({ ...originalRule, active: false });
+                } else {
+                    onAddRecurringTransaction({ 
+                        ...originalRule, 
+                        remainingOccurrences: monthsDiff 
+                    });
+                }
+            }
         }
     }
     setDeleteModal(null);
@@ -393,23 +415,54 @@ export const Transactions: React.FC<TransactionsProps> = ({
     setSelectedDay(null);
   };
 
+  const handleOpenDatePicker = () => {
+    setPickerYear(currentDate.getFullYear());
+    setShowDatePicker(true);
+  };
+
+  const jumpToDate = (monthIndex: number) => {
+    setCurrentDate(new Date(pickerYear, monthIndex, 1));
+    setSelectedDay(null);
+    setShowDatePicker(false);
+  };
+
   const projectedTransactions = useMemo(() => {
      const projected: any[] = [];
      const viewYear = currentDate.getFullYear();
      const viewMonth = currentDate.getMonth(); 
-     const today = new Date();
-     today.setHours(0,0,0,0);
      
      recurringTransactions.forEach(rule => {
         if (!rule.active) return;
-        const targetDate = new Date(viewYear, viewMonth, rule.dayOfMonth);
-        if (targetDate.getMonth() !== viewMonth) return; // Handles invalid dates like Feb 30
         
-        const dateString = targetDate.toISOString().split('T')[0];
-        // Check if real txn exists
+        // 1. Determine Target Day
+        let targetDay = rule.dayOfMonth;
+        const daysInViewMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+        if (targetDay > daysInViewMonth) targetDay = daysInViewMonth;
+
+        const targetDate = new Date(viewYear, viewMonth, targetDay);
+        const dateString = getLocalDateString(targetDate);
+        
+        // Check if this date is skipped
+        if (rule.skippedDates?.includes(dateString)) return;
+
+        // --- FIX: Infinite Loop & Remaining Count Logic ---
+        const nextDueDateObj = new Date(rule.nextDueDate);
+        const dueYear = nextDueDateObj.getFullYear();
+        const dueMonth = nextDueDateObj.getMonth();
+
+        const monthDiff = (viewYear - dueYear) * 12 + (viewMonth - dueMonth);
+
+        // If the view month is BEFORE the next due date, don't show.
+        if (monthDiff < 0) return;
+
+        if (rule.remainingOccurrences !== undefined) {
+             if (monthDiff >= rule.remainingOccurrences) return;
+        }
+
+        // 3. Check if real txn exists (To avoid duplicates)
         const exists = transactions.some(t => t.recurringRuleId === rule.id && t.date === dateString);
         
-        if (!exists && targetDate >= today) {
+        if (!exists) {
              projected.push({
                 ...rule,
                 isProjected: true,
@@ -466,7 +519,8 @@ export const Transactions: React.FC<TransactionsProps> = ({
       const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const stat = dailyStats[dateString];
       const dailyItems = transactionsByDate[dateString] || [];
-      const isToday = new Date().toISOString().split('T')[0] === dateString;
+      const todayStr = getLocalDateString(new Date());
+      const isToday = todayStr === dateString;
       const isSelected = selectedDay === dateString;
       const netAmount = stat ? stat.income - stat.expense : 0;
 
@@ -572,7 +626,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
 
   const renderAccountOptions = (excludeId?: string) => (
     <>
-      <option value="">請選擇帳戶</option>
+      {/* Removed "Unspecified" option as per request */}
       {assets.length > 0 && (
         <optgroup label="資產 (Assets)">
           {assets.filter(a => a.id !== excludeId).map(a => (
@@ -595,9 +649,13 @@ export const Transactions: React.FC<TransactionsProps> = ({
       {/* CALENDAR SECTION */}
       <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-xl shadow-xl overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/30">
-          <div className="flex items-center gap-2 text-cyan-400 font-mono font-bold">
+          <div 
+            className="flex items-center gap-2 text-cyan-400 font-mono font-bold cursor-pointer hover:text-cyan-200 transition-colors bg-slate-800/50 px-3 py-1.5 rounded-lg border border-transparent hover:border-cyan-500/30 hover:bg-slate-800"
+            onClick={handleOpenDatePicker}
+          >
             <CalendarIcon size={18} />
             <span>{currentDate.getFullYear()} 年 {currentDate.getMonth() + 1} 月</span>
+            <ChevronDown size={14} className="opacity-70" />
           </div>
           <div className="flex gap-2">
             <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-cyan-400 transition-colors">
@@ -695,17 +753,26 @@ export const Transactions: React.FC<TransactionsProps> = ({
               <>
                 <div>
                     <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">FROM</label>
-                    <select value={sourceId} onChange={(e) => setSourceId(e.target.value)} className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 text-sm" required>{renderAccountOptions(destinationId)}</select>
+                    <select value={sourceId} onChange={(e) => setSourceId(e.target.value)} className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 text-sm" required>
+                      <option value="" disabled>請選擇帳戶</option>
+                      {renderAccountOptions(destinationId)}
+                    </select>
                 </div>
                 <div>
                     <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">TO</label>
-                    <select value={destinationId} onChange={(e) => setDestinationId(e.target.value)} className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 text-sm" required>{renderAccountOptions(sourceId)}</select>
+                    <select value={destinationId} onChange={(e) => setDestinationId(e.target.value)} className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 text-sm" required>
+                      <option value="" disabled>請選擇帳戶</option>
+                      {renderAccountOptions(sourceId)}
+                    </select>
                 </div>
               </>
             ) : (
               <div className="md:col-span-1 lg:col-span-2">
                   <label className="block text-xs font-medium text-cyan-600 mb-2 font-mono">ACCOUNT</label>
-                  <select value={sourceId} onChange={(e) => setSourceId(e.target.value)} className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 text-sm"><option value="">不指定 (僅記錄)</option>{renderAccountOptions()}</select>
+                  <select value={sourceId} onChange={(e) => setSourceId(e.target.value)} className="w-full px-3 py-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-200 text-sm" required>
+                    <option value="" disabled>請選擇帳戶</option>
+                    {renderAccountOptions()}
+                  </select>
               </div>
             )}
 
@@ -865,7 +932,6 @@ export const Transactions: React.FC<TransactionsProps> = ({
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
              <div className="bg-slate-900 w-full max-w-sm border border-rose-500/30 rounded-2xl shadow-[0_0_30px_rgba(244,63,94,0.2)] p-6 relative animate-scale-in overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-1 bg-rose-500"></div>
-                <div className="absolute -top-10 -right-10 w-32 h-32 bg-rose-500/10 rounded-full blur-2xl pointer-events-none"></div>
                 
                 <div className="flex items-center gap-3 mb-4">
                    <div className="p-3 bg-rose-900/20 rounded-full text-rose-500 border border-rose-500/20">
@@ -875,7 +941,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
                 </div>
                 
                 <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-                   這是一筆循環交易紀錄。請選擇您希望如何處理此刪除操作：
+                   請選擇您希望如何處理此操作：
                 </p>
                 
                 <div className="space-y-3">
@@ -884,7 +950,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
                       className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 font-medium text-sm text-left flex items-center gap-3 transition-all"
                    >
                       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full shadow-[0_0_5px_currentColor]"></span>
-                      僅刪除該次交易 (跳過本期)
+                      <span>選項 1 (刪除該次交易)</span>
                    </button>
                    
                    <button 
@@ -892,18 +958,84 @@ export const Transactions: React.FC<TransactionsProps> = ({
                       className="w-full py-3 px-4 bg-rose-900/20 hover:bg-rose-900/40 text-rose-400 rounded-xl border border-rose-500/30 font-medium text-sm text-left flex items-center gap-3 transition-all"
                    >
                       <span className="w-1.5 h-1.5 bg-rose-500 rounded-full shadow-[0_0_5px_currentColor]"></span>
-                      刪除這次之後的所有交易 (停止)
+                      <span>選項 2 (刪除這次之後的所有交易)</span>
                    </button>
                    
                    <button 
                       onClick={() => setDeleteModal(null)}
                       className="w-full py-2 text-slate-500 hover:text-slate-300 text-xs mt-2 font-mono"
                    >
-                      [ 取消 CANCEL ]
+                      選項 3 (取消)
                    </button>
                 </div>
              </div>
           </div>
+      )}
+
+      {/* DATE PICKER MODAL */}
+      {showDatePicker && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+           {/* Click outside to close */}
+           <div className="absolute inset-0" onClick={() => setShowDatePicker(false)}></div>
+           
+           <div className="bg-slate-900 w-full max-w-[320px] border border-cyan-500/30 rounded-2xl shadow-[0_0_30px_rgba(6,182,212,0.2)] p-5 relative overflow-hidden z-10">
+              <div className="absolute top-0 right-0 p-2 text-[10px] text-cyan-900/50 font-tech">SYS.DATE.JUMP</div>
+              
+              <h3 className="text-sm font-bold text-slate-400 mb-4 font-mono text-center tracking-wider">SELECT DATE</h3>
+              
+              {/* Year Selector */}
+              <div className="flex items-center justify-between mb-6 px-2 bg-slate-800/50 rounded-lg p-1 border border-slate-700">
+                  <button 
+                    onClick={() => setPickerYear(y => y - 1)}
+                    className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <span className="text-xl font-bold font-mono text-cyan-400 shadow-cyan-500/20 drop-shadow-[0_0_5px_rgba(6,182,212,0.5)]">
+                    {pickerYear}
+                  </span>
+                  <button 
+                    onClick={() => setPickerYear(y => y + 1)}
+                    className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+              </div>
+
+              {/* Month Grid */}
+              <div className="grid grid-cols-3 gap-3">
+                 {Array.from({length: 12}).map((_, i) => {
+                    const isCurrentSelection = currentDate.getFullYear() === pickerYear && currentDate.getMonth() === i;
+                    const isCurrentMonthReal = new Date().getFullYear() === pickerYear && new Date().getMonth() === i;
+                    
+                    return (
+                       <button
+                          key={i}
+                          onClick={() => jumpToDate(i)}
+                          className={`
+                             py-3 rounded-lg text-sm font-mono transition-all border relative overflow-hidden group
+                             ${isCurrentSelection 
+                               ? 'bg-cyan-600 text-white border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.4)]' 
+                               : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200 hover:border-slate-500'}
+                          `}
+                       >
+                          {isCurrentMonthReal && !isCurrentSelection && (
+                             <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-cyan-500 rounded-full"></span>
+                          )}
+                          {i + 1} 月
+                       </button>
+                    );
+                 })}
+              </div>
+
+              <button 
+                onClick={() => setShowDatePicker(false)} 
+                className="w-full mt-6 py-3 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-800 font-mono text-xs transition-colors"
+              >
+                 [ CANCEL ]
+              </button>
+           </div>
+        </div>
       )}
     </div>
   );

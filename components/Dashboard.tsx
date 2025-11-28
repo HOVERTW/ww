@@ -1,8 +1,8 @@
 
 import React, { useMemo } from 'react';
 import { FinancialData } from '../types';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { Wallet, TrendingUp, TrendingDown, PiggyBank, Activity } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine } from 'recharts';
+import { Wallet, TrendingUp, TrendingDown, PiggyBank, Activity, Calendar } from 'lucide-react';
 
 interface DashboardProps {
   data: FinancialData;
@@ -18,11 +18,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     const totalLiabilities = data.liabilities.reduce((acc, curr) => acc + curr.value, 0);
     const netWorth = totalAssets - totalLiabilities;
     
-    // Calculate Monthly Cash Flow (Current Month Only)
+    // --- Monthly Cash Flow ---
     const now = new Date();
     const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     
-    // Filter transactions for the current month
     const currentMonthTransactions = data.transactions.filter(t => t.date.startsWith(currentMonthPrefix));
 
     const income = currentMonthTransactions
@@ -33,387 +32,300 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       .filter(t => t.type === 'expense')
       .reduce((acc, t) => acc + t.amount, 0);
 
-    return { totalAssets, totalLiabilities, netWorth, income, expenses };
+    // --- Yearly Cash Flow ---
+    const currentYearPrefix = `${now.getFullYear()}-`;
+    const currentYearTransactions = data.transactions.filter(t => t.date.startsWith(currentYearPrefix));
+
+    const yearIncome = currentYearTransactions
+      .filter(t => t.type === 'income')
+      .reduce((acc, t) => acc + t.amount, 0);
+
+    const yearExpenses = currentYearTransactions
+      .filter(t => t.type === 'expense')
+      .reduce((acc, t) => acc + t.amount, 0);
+
+    return { totalAssets, totalLiabilities, netWorth, income, expenses, yearIncome, yearExpenses };
   }, [data]);
 
   const expenseByCategory = useMemo(() => {
     const categoryMap: Record<string, number> = {};
-    
-    // Determine which transactions to show in pie chart
-    // Option A: All time expenses (better for overall habit analysis)
-    // Option B: Current month only (matches the cash flow card)
-    // Keeping "All Time" for better data density in the chart.
+    const now = new Date();
+    const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     
     data.transactions
-      .filter(t => t.type === 'expense')
+      .filter(t => t.type === 'expense' && t.date.startsWith(currentMonthPrefix))
       .forEach(t => {
         categoryMap[t.category] = (categoryMap[t.category] || 0) + t.amount;
       });
-    
-    return Object.keys(categoryMap).map(key => ({
-      name: key,
-      value: categoryMap[key]
-    })).sort((a, b) => b.value - a.value);
+
+    return Object.entries(categoryMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
   }, [data.transactions]);
 
-  const assetsByType = useMemo(() => {
-    const typeMap: Record<string, number> = {};
-    const labelMap: Record<string, string> = {
-       'cash': '現金存款',
-       'tw_stock': '台股',
-       'us_stock': '美股',
-       'crypto': '加密貨幣',
-       'property': '不動產',
-       'investment': '其他投資',
-       'insurance': '保險',
-       'other': '其他'
-    };
+  // Generate simple history for Net Worth trend based on transactions (Backwards simulation)
+  const chartData = useMemo(() => {
+     // Create last 30 days
+     const days = 30;
+     const result = [];
+     const today = new Date();
+     
+     // 1. Group ALL transactions by date to lookup
+     const txMap: Record<string, number> = {};
+     data.transactions.forEach(t => {
+        // Only Income and Expense affect Net Worth (Transfers don't change Total Net Worth, just move asset<->asset or asset<->liability)
+        // Wait, Repaying liability (Transfer Asset->Liability) reduces Asset and reduces Liability by same amount => Net Worth stays same.
+        // Spending (Expense) reduces Asset => Net Worth decreases.
+        // Earning (Income) increases Asset => Net Worth increases.
+        const d = t.date;
+        if (!txMap[d]) txMap[d] = 0;
+        if (t.type === 'income') txMap[d] += t.amount;
+        if (t.type === 'expense') txMap[d] -= t.amount;
+     });
 
-    data.assets.forEach(a => {
-       const label = labelMap[a.type] || a.type;
-       typeMap[label] = (typeMap[label] || 0) + a.value;
-    });
+     let currentNW = summary.netWorth;
 
-    return Object.keys(typeMap).map(key => ({
-       name: key,
-       value: typeMap[key]
-    })).sort((a, b) => b.value - a.value);
-
-  }, [data.assets]);
-
-  // --- AI-Defined Historical Net Worth Logic ---
-  const netWorthHistory = useMemo(() => {
-    // 1. Initialize with current state
-    const currentNetWorth = summary.netWorth;
-    
-    // If no transactions, just show a straight line for the last 30 days
-    if (data.transactions.length === 0) {
-      const result = [];
-      const today = new Date();
-      for(let i=29; i>=0; i--) {
+     // 2. Loop Backwards
+     for (let i = 0; i < days; i++) {
         const d = new Date(today);
         d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        
+        // Push the END OF DAY Net Worth for this date
         result.push({
-          date: d.toISOString().split('T')[0],
-          netWorth: currentNetWorth,
-          formattedDate: `${d.getMonth()+1}/${d.getDate()}`
+           name: `${d.getMonth()+1}/${d.getDate()}`,
+           netWorth: currentNW
         });
-      }
-      return result;
+
+        // To get Yesterday's End NW, we must subtract today's change from Today's End NW.
+        // If today I earned 100, NW increased 100. So Yesterday was Today - 100.
+        // Change = Income - Expense.
+        // PrevNW = CurrNW - Change
+        const change = txMap[dateStr] || 0;
+        currentNW = currentNW - change;
+     }
+
+     return result.reverse();
+  }, [data.transactions, summary.netWorth]);
+
+  // --- Gradient Split Calculation ---
+  const gradientOffset = () => {
+    const dataMax = Math.max(...chartData.map((i) => i.netWorth));
+    const dataMin = Math.min(...chartData.map((i) => i.netWorth));
+  
+    if (dataMax <= 0) {
+      return 0; // Everything is negative -> All red
     }
-
-    // 2. Sort transactions desc (newest first)
-    const sortedTxns = [...data.transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    
-    // 3. Determine Time Horizon
-    const oldestTxn = sortedTxns[sortedTxns.length - 1];
-    const oldestDate = new Date(oldestTxn.date);
-    const today = new Date();
-    
-    // Calculate span in days
-    const timeSpanDays = Math.ceil((today.getTime() - oldestDate.getTime()) / (1000 * 60 * 60 * 24));
-    
-    // AI Adaptive Logic: Define sampling rate based on history length
-    let sampleStep = 1; // Default daily
-    let dateFormat = (d: Date) => `${d.getMonth()+1}/${d.getDate()}`; // Default MM/DD
-
-    if (timeSpanDays > 365 * 2) {
-       // > 2 Years: Monthly samples
-       sampleStep = 30;
-       dateFormat = (d: Date) => `${d.getFullYear()}.${d.getMonth()+1}`;
-    } else if (timeSpanDays > 180) {
-       // > 6 Months: Weekly samples
-       sampleStep = 7;
-       dateFormat = (d: Date) => `${d.getMonth()+1}/${d.getDate()}`;
-    } else if (timeSpanDays > 60) {
-       // > 2 Months: Every 3 days
-       sampleStep = 3;
+    if (dataMin >= 0) {
+      return 1; // Everything is positive -> All cyan
     }
-
-    // 4. Build Daily Change Map
-    const changesByDay: Record<string, number> = {};
-    sortedTxns.forEach(t => {
-      let impact = 0;
-      if (t.type === 'income') impact = t.amount;
-      if (t.type === 'expense') impact = -t.amount;
-      // Transfers impact = 0
-
-      const dateStr = t.date; // YYYY-MM-DD
-      changesByDay[dateStr] = (changesByDay[dateStr] || 0) + impact;
-    });
-
-    // 5. Replay Backwards from Today
-    const fullHistory = [];
-    let runningNW = currentNetWorth;
-    
-    const iterDate = new Date(today);
-    iterDate.setHours(0,0,0,0);
-    const endDateMs = oldestDate.getTime();
-
-    let safetyCounter = 0;
-    
-    while (iterDate.getTime() >= endDateMs && safetyCounter < 365 * 5) {
-       const dateStr = iterDate.toISOString().split('T')[0];
-       
-       fullHistory.unshift({
-          timestamp: iterDate.getTime(),
-          date: dateStr,
-          netWorth: runningNW
-       });
-
-       const changeToday = changesByDay[dateStr] || 0;
-       runningNW = runningNW - changeToday; 
-       
-       iterDate.setDate(iterDate.getDate() - 1);
-       safetyCounter++;
-    }
-
-    const startStr = iterDate.toISOString().split('T')[0];
-    fullHistory.unshift({
-        timestamp: iterDate.getTime(),
-        date: startStr,
-        netWorth: runningNW
-    });
-
-    // 6. Downsample based on AI Logic
-    return fullHistory
-      .filter((_, idx) => idx % sampleStep === 0 || idx === fullHistory.length - 1)
-      .map(item => ({
-        ...item,
-        formattedDate: dateFormat(new Date(item.timestamp))
-      }));
-
-  }, [data, summary.netWorth]);
-
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-slate-900/95 border border-cyan-500/50 p-3 rounded-lg shadow-[0_0_15px_rgba(6,182,212,0.3)] backdrop-blur-xl z-50">
-          <p className="text-slate-400 text-xs font-mono mb-1 border-b border-slate-800 pb-1">{label || payload[0].name}</p>
-          <p className="text-cyan-400 text-sm font-mono font-bold flex items-center gap-2">
-             <span className="w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_5px_rgba(34,211,238,0.8)]"></span>
-             ${payload[0].value.toLocaleString()}
-          </p>
-        </div>
-      );
-    }
-    return null;
+  
+    return dataMax / (dataMax - dataMin);
   };
+  
+  const off = gradientOffset();
 
   return (
-    <div className="space-y-6 animate-fade-in text-slate-200 pb-8">
-      {/* Top Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* Net Worth */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-cyan-500/50 transition-colors">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500 to-blue-500"></div>
-          <div className="flex items-center space-x-3 mb-2">
-            <div className="p-2 bg-cyan-900/30 rounded-lg text-cyan-400 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]">
-              <Wallet size={20} />
-            </div>
-            <h3 className="text-slate-400 text-sm font-medium uppercase tracking-wider font-mono">淨資產 (Net Worth)</h3>
+    <div className="space-y-6 animate-fade-in">
+      {/* SUMMARY CARDS GRID */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {/* 1. Net Worth */}
+        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-2xl border border-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.15)] relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-3 opacity-20 group-hover:opacity-40 transition-opacity">
+             <Wallet size={40} className="text-cyan-400" />
           </div>
-          <p className={`text-2xl stat-value font-bold ${summary.netWorth >= 0 ? 'text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.4)]' : 'text-rose-500 drop-shadow-[0_0_8px_rgba(244,63,94,0.4)]'}`}>
-            ${summary.netWorth.toLocaleString()}
+          <h3 className="text-slate-400 text-xs font-bold font-mono tracking-wider uppercase mb-1">淨資產 (Net Worth)</h3>
+          <p className="text-2xl font-bold text-cyan-400 font-mono tracking-tight drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]">
+             ${summary.netWorth.toLocaleString()}
           </p>
+          <div className="mt-2 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+             <div className="h-full bg-cyan-500 shadow-[0_0_10px_rgba(34,211,238,0.8)]" style={{ width: '75%' }}></div>
+          </div>
         </div>
 
-        {/* Total Assets */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-colors">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-green-500"></div>
-          <div className="flex items-center space-x-3 mb-2">
-            <div className="p-2 bg-emerald-900/30 rounded-lg text-emerald-400 border border-emerald-500/30">
-              <TrendingUp size={20} />
-            </div>
-            <h3 className="text-slate-400 text-sm font-medium uppercase tracking-wider font-mono">總資產 (Assets)</h3>
+        {/* 2. Assets */}
+        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-2xl border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)] relative overflow-hidden group">
+           <div className="absolute top-0 right-0 p-3 opacity-20 group-hover:opacity-40 transition-opacity">
+             <TrendingUp size={40} className="text-emerald-400" />
           </div>
-          <p className="text-2xl stat-value font-bold text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">${summary.totalAssets.toLocaleString()}</p>
+          <h3 className="text-slate-400 text-xs font-bold font-mono tracking-wider uppercase mb-1">總資產 (Assets)</h3>
+          <p className="text-2xl font-bold text-emerald-400 font-mono tracking-tight">
+             ${summary.totalAssets.toLocaleString()}
+          </p>
+          <p className="text-xs text-slate-500 mt-1 font-mono">資產配置：優良</p>
         </div>
 
-        {/* Total Liabilities */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-rose-500/50 transition-colors">
-           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-rose-500 to-red-500"></div>
-          <div className="flex items-center space-x-3 mb-2">
-            <div className="p-2 bg-rose-900/30 rounded-lg text-rose-400 border border-rose-500/30">
-              <TrendingDown size={20} />
-            </div>
-            <h3 className="text-slate-400 text-sm font-medium uppercase tracking-wider font-mono">總負債 (Liabilities)</h3>
+        {/* 3. Liabilities */}
+        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-2xl border border-rose-500/30 shadow-[0_0_15px_rgba(244,63,94,0.15)] relative overflow-hidden group">
+           <div className="absolute top-0 right-0 p-3 opacity-20 group-hover:opacity-40 transition-opacity">
+             <TrendingDown size={40} className="text-rose-400" />
           </div>
-          <p className="text-2xl stat-value font-bold text-rose-400 drop-shadow-[0_0_5px_rgba(251,113,133,0.5)]">${summary.totalLiabilities.toLocaleString()}</p>
+          <h3 className="text-slate-400 text-xs font-bold font-mono tracking-wider uppercase mb-1">總負債 (Debts)</h3>
+          <p className="text-2xl font-bold text-rose-400 font-mono tracking-tight">
+             ${summary.totalLiabilities.toLocaleString()}
+          </p>
+          <p className="text-xs text-slate-500 mt-1 font-mono">負債比: {((summary.totalLiabilities / (summary.totalAssets || 1))*100).toFixed(1)}%</p>
         </div>
+
+        {/* 4. Monthly Balance */}
+        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-2xl border border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.15)] relative overflow-hidden group">
+           <div className="absolute top-0 right-0 p-3 opacity-20 group-hover:opacity-40 transition-opacity">
+             <PiggyBank size={40} className="text-amber-400" />
+          </div>
+          <h3 className="text-slate-400 text-xs font-bold font-mono tracking-wider uppercase mb-1">當月結餘</h3>
+          <p className={`text-2xl font-bold font-mono tracking-tight ${(summary.income - summary.expenses) >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>
+             ${(summary.income - summary.expenses).toLocaleString()}
+          </p>
+          <div className="flex gap-2 text-[10px] mt-1 font-mono">
+             <span className="text-emerald-400/80">收: {summary.income.toLocaleString()}</span>
+             <span className="text-rose-400/80">支: {summary.expenses.toLocaleString()}</span>
+          </div>
+        </div>
+
+        {/* 5. Yearly Balance (NEW) */}
+        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-2xl border border-violet-500/30 shadow-[0_0_15px_rgba(139,92,246,0.15)] relative overflow-hidden group">
+           <div className="absolute top-0 right-0 p-3 opacity-20 group-hover:opacity-40 transition-opacity">
+             <Calendar size={40} className="text-violet-400" />
+          </div>
+          <h3 className="text-slate-400 text-xs font-bold font-mono tracking-wider uppercase mb-1">當年結餘</h3>
+          <p className={`text-2xl font-bold font-mono tracking-tight ${(summary.yearIncome - summary.yearExpenses) >= 0 ? 'text-violet-400' : 'text-rose-400'}`}>
+             ${(summary.yearIncome - summary.yearExpenses).toLocaleString()}
+          </p>
+           <div className="flex gap-2 text-[10px] mt-1 font-mono">
+             <span className="text-emerald-400/80">年收: {((summary.yearIncome)/10000).toFixed(1)}萬</span>
+             <span className="text-rose-400/80">年支: {((summary.yearExpenses)/10000).toFixed(1)}萬</span>
+          </div>
+        </div>
+      </div>
+
+      {/* CHARTS SECTION */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Monthly Cash Flow */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group hover:border-amber-500/50 transition-colors">
-           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-yellow-500"></div>
-          <div className="flex items-center space-x-3 mb-2">
-            <div className="p-2 bg-amber-900/30 rounded-lg text-amber-400 border border-amber-500/30">
-              <PiggyBank size={20} />
-            </div>
-            <h3 className="text-slate-400 text-sm font-medium uppercase tracking-wider font-mono">當月結餘 (Monthly)</h3>
-          </div>
-          <p className={`text-2xl stat-value font-bold ${(summary.income - summary.expenses) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            ${(summary.income - summary.expenses).toLocaleString()}
-          </p>
-        </div>
-      </div>
-
-      {/* Net Worth History Chart */}
-      <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg h-[350px] flex flex-col relative group">
-          <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-cyan-500 to-transparent opacity-50"></div>
-          
-          <div className="absolute top-4 right-4 flex flex-col items-end pointer-events-none hidden sm:flex">
-            <div className="text-[10px] text-cyan-500 font-tech animate-pulse flex items-center gap-1">
-               <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full"></span>
-               AI_TIMELINE_ADAPTIVE
-            </div>
-            <div className="text-[9px] text-slate-600 font-mono mt-1">
-               SAMPLES: {netWorthHistory.length} // RANGE: AUTO
-            </div>
-          </div>
-
-          <h3 className="text-base sm:text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono tracking-wide">
-            <Activity size={18} className="text-cyan-400" />
-            淨資產趨勢曲線 (NET WORTH)
-          </h3>
-          
-          <div className="flex-1 w-full">
-             <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={netWorthHistory} margin={{ top: 10, right: 10, left: -20, bottom: 45 }}>
-                  <defs>
-                    <linearGradient id="colorNetWorth" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.4}/>
-                      <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
-                  <XAxis 
-                    dataKey="formattedDate" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fill: '#64748b', fontSize: 10, fontFamily: 'Share Tech Mono', dy: 10}} 
-                    minTickGap={30}
-                    tickMargin={10}
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fill: '#64748b', fontSize: 10, fontFamily: 'Share Tech Mono'}}
-                    tickFormatter={(value) => `$${value >= 1000 ? (value/1000).toFixed(0) + 'k' : value}`}
-                  />
-                  <Tooltip cursor={{stroke: '#22d3ee', strokeWidth: 1, strokeDasharray: '5 5'}} content={<CustomTooltip />} />
-                  <Area 
-                    type="monotone" 
-                    dataKey="netWorth" 
-                    name="淨資產"
-                    stroke="#22d3ee" 
-                    strokeWidth={2}
-                    fillOpacity={1} 
-                    fill="url(#colorNetWorth)"
-                    animationDuration={1500}
-                  />
-                </AreaChart>
-             </ResponsiveContainer>
-          </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Asset Allocation Pie Chart */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg h-[400px] flex flex-col relative">
-          <div className="absolute top-0 right-0 p-2 text-xs text-slate-600 font-tech hidden sm:block">SYS.DIAG.ASSET</div>
-          <h3 className="text-base sm:text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono">
-             <span className="w-1 h-4 bg-emerald-500 inline-block"></span>
-             資產配置 (Allocation)
-          </h3>
-          {assetsByType.length > 0 ? (
-            <div className="flex-1 w-full h-full">
-               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={assetsByType}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={5}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {assetsByType.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                </PieChart>
+        {/* NET WORTH TREND CHART */}
+        <div className="lg:col-span-2 bg-slate-900/60 backdrop-blur-sm p-6 rounded-2xl border border-slate-700 shadow-lg relative">
+           <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500/50"></div>
+           <div className="flex items-center justify-between mb-6">
+              <h3 className="text-slate-200 font-bold font-mono flex items-center gap-2">
+                 <Activity size={18} className="text-cyan-400" />
+                 淨資產趨勢 (30天)
+              </h3>
+              <span className="text-[10px] text-slate-500 font-mono bg-slate-800 px-2 py-1 rounded">即時數據</span>
+           </div>
+           
+           <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                 <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <defs>
+                      {/* Split Gradient Definition */}
+                      <linearGradient id="splitColor" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset={off} stopColor="#22d3ee" stopOpacity={0.3}/>
+                        <stop offset={off} stopColor="#f43f5e" stopOpacity={0.3}/>
+                      </linearGradient>
+                      {/* Optional: Split Stroke if we want line color to change exactly at 0 */}
+                       <linearGradient id="splitStroke" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset={off} stopColor="#22d3ee" stopOpacity={1}/>
+                        <stop offset={off} stopColor="#f43f5e" stopOpacity={1}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis 
+                       dataKey="name" 
+                       stroke="#64748b" 
+                       fontSize={10} 
+                       tickLine={false} 
+                       axisLine={false} 
+                       tickMargin={10}
+                    />
+                    <YAxis 
+                       stroke="#64748b" 
+                       fontSize={10} 
+                       tickLine={false} 
+                       axisLine={false}
+                       tickFormatter={(value) => `${(value / 10000).toFixed(0)}萬`}
+                    />
+                    <Tooltip 
+                       contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
+                       itemStyle={{ color: '#22d3ee', fontFamily: 'monospace' }}
+                       formatter={(value: number) => [`$${value.toLocaleString()}`, '淨資產']}
+                    />
+                    {/* Zero Line Reference */}
+                    <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
+                    
+                    <Area 
+                      type="monotone" 
+                      dataKey="netWorth" 
+                      stroke="url(#splitStroke)" 
+                      strokeWidth={3} 
+                      fillOpacity={1} 
+                      fill="url(#splitColor)" 
+                    />
+                 </AreaChart>
               </ResponsiveContainer>
-            </div>
-          ) : (
-             <div className="flex-1 flex items-center justify-center text-slate-500 font-mono text-sm border border-dashed border-slate-800 rounded-lg">
-              [ 無資產數據 ]
-            </div>
-          )}
-          {assetsByType.length > 0 && (
-            <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-mono">
-               {assetsByType.slice(0, 8).map((item, idx) => (
-                 <div key={item.name} className="flex items-center justify-between border-b border-slate-800 pb-1">
-                   <div className="flex items-center min-w-0">
-                     <span className="w-2 h-2 rounded-sm mr-2 shadow-[0_0_5px_currentColor] flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length], color: COLORS[idx % COLORS.length] }}></span>
-                     <span className="truncate text-slate-400">{item.name}</span>
-                   </div>
-                   <span className="font-medium text-slate-300 ml-2">${item.value.toLocaleString()}</span>
-                 </div>
-               ))}
-            </div>
-          )}
+           </div>
         </div>
 
-        {/* Expense Breakdown (Existing) */}
-        <div className="bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 rounded-xl border border-slate-700 shadow-lg h-[400px] flex flex-col relative">
-          <div className="absolute top-0 right-0 p-2 text-xs text-slate-600 font-tech hidden sm:block">SYS.DIAG.EXP</div>
-          <h3 className="text-base sm:text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2 font-mono">
-             <span className="w-1 h-4 bg-fuchsia-500 inline-block"></span>
-             支出類別分析
-          </h3>
-          {expenseByCategory.length > 0 ? (
-            <div className="flex-1 w-full h-full">
-               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={expenseByCategory}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={5}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {expenseByCategory.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-slate-500 font-mono text-sm border border-dashed border-slate-800 rounded-lg">
-              [ 無支出數據 ]
-            </div>
-          )}
-          {expenseByCategory.length > 0 && (
-            <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-mono">
-               {expenseByCategory.slice(0, 8).map((item, idx) => (
-                 <div key={item.name} className="flex items-center justify-between border-b border-slate-800 pb-1">
-                   <div className="flex items-center min-w-0">
-                     <span className="w-2 h-2 rounded-sm mr-2 shadow-[0_0_5px_currentColor] flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length], color: COLORS[idx % COLORS.length] }}></span>
-                     <span className="truncate text-slate-400">{item.name}</span>
+        {/* EXPENSE PIE CHART */}
+        <div className="bg-slate-900/60 backdrop-blur-sm p-6 rounded-2xl border border-slate-700 shadow-lg relative">
+           <div className="absolute top-0 left-0 w-1 h-full bg-rose-500/50"></div>
+           <h3 className="text-slate-200 font-bold font-mono mb-6 flex items-center gap-2">
+              <Activity size={18} className="text-rose-400" />
+              本月支出分佈
+           </h3>
+           <div className="h-[300px] w-full relative">
+              {expenseByCategory.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={expenseByCategory}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {expenseByCategory.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="rgba(0,0,0,0.5)" />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
+                         itemStyle={{ color: '#e2e8f0', fontFamily: 'monospace' }}
+                         formatter={(value: number) => `$${value.toLocaleString()}`}
+                      />
+                    </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500">
+                   <p className="font-mono text-xs">無數據</p>
+                </div>
+              )}
+              
+              {/* Center Text Overlay */}
+              {expenseByCategory.length > 0 && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                   <div className="text-center">
+                      <span className="text-xs text-slate-500 font-mono block">總計</span>
+                      <span className="text-xl font-bold text-slate-200 font-mono">${summary.expenses.toLocaleString()}</span>
                    </div>
-                   <span className="font-medium text-slate-300 ml-2">${item.value.toLocaleString()}</span>
+                </div>
+              )}
+           </div>
+           
+           {/* Legend */}
+           <div className="mt-4 max-h-[150px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 pr-2">
+              {expenseByCategory.map((entry, index) => (
+                 <div key={index} className="flex items-center justify-between py-1.5 border-b border-slate-800/50 last:border-0">
+                    <div className="flex items-center gap-2">
+                       <div className="w-2 h-2 rounded-full shadow-[0_0_5px_currentColor]" style={{ backgroundColor: COLORS[index % COLORS.length], color: COLORS[index % COLORS.length] }}></div>
+                       <span className="text-xs text-slate-300 font-mono">{entry.name}</span>
+                    </div>
+                    <span className="text-xs font-bold text-slate-400 font-mono">${entry.value.toLocaleString()}</span>
                  </div>
-               ))}
-            </div>
-          )}
+              ))}
+           </div>
         </div>
+
       </div>
     </div>
   );

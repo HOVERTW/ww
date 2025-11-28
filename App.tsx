@@ -181,27 +181,32 @@ function App() {
         modified = true;
         const nextDueStr = nextDue.toISOString().split('T')[0];
         
-        // Generate the transaction
-        // Note: Since nextDue <= today, these are processed immediately
-        const newTxn: Transaction = {
-          id: generateId(),
-          date: nextDueStr,
-          type: rule.type,
-          amount: rule.amount,
-          category: rule.category,
-          note: `[自動扣款] ${rule.name} ${ruleClone.remainingOccurrences !== undefined ? `(剩餘 ${ruleClone.remainingOccurrences - 1} 期)` : ''}`,
-          sourceId: rule.sourceId,
-          sourceType: rule.sourceType,
-          destinationId: rule.destinationId,
-          destinationType: rule.destinationType,
-          recurringRuleId: rule.id,
-          processed: true // Immediate processing for catch-up
-        };
-        newTransactions.push(newTxn);
-        
-        // Apply Balance immediately since it's due/past
-        applyTransactionEffect(newTxn, updatedAssets, updatedLiabilities);
+        // CHECK IF DATE IS SKIPPED
+        const isSkipped = ruleClone.skippedDates?.includes(nextDueStr);
 
+        if (!isSkipped) {
+            // Generate the transaction
+            const newTxn: Transaction = {
+              id: generateId(),
+              date: nextDueStr,
+              type: rule.type,
+              amount: rule.amount,
+              category: rule.category,
+              note: `[自動扣款] ${rule.name} ${ruleClone.remainingOccurrences !== undefined ? `(剩餘 ${ruleClone.remainingOccurrences - 1} 期)` : ''}`,
+              sourceId: rule.sourceId,
+              sourceType: rule.sourceType,
+              destinationId: rule.destinationId,
+              destinationType: rule.destinationType,
+              recurringRuleId: rule.id,
+              processed: true // Immediate processing for catch-up
+            };
+            newTransactions.push(newTxn);
+            
+            // Apply Balance immediately
+            applyTransactionEffect(newTxn, updatedAssets, updatedLiabilities);
+        }
+
+        // Decrement remaining (even if skipped, time has passed)
         if (ruleClone.remainingOccurrences !== undefined) {
           ruleClone.remainingOccurrences -= 1;
           if (ruleClone.remainingOccurrences <= 0) {
@@ -221,7 +226,7 @@ function App() {
       return ruleClone;
     });
 
-    if (newTransactions.length > 0) {
+    if (newTransactions.length > 0 || updatedRecurring !== currentData.recurringTransactions) {
       return {
         ...currentData,
         transactions: [...newTransactions, ...currentData.transactions],
@@ -338,6 +343,18 @@ function App() {
     setData(prev => ({ ...prev, assets: prev.assets.filter(a => a.id !== id) }));
   };
 
+  const handleReorderAsset = (index: number, direction: 'up' | 'down') => {
+    setData(prev => {
+      const newAssets = [...prev.assets];
+      if (direction === 'up' && index > 0) {
+        [newAssets[index], newAssets[index - 1]] = [newAssets[index - 1], newAssets[index]];
+      } else if (direction === 'down' && index < newAssets.length - 1) {
+        [newAssets[index], newAssets[index + 1]] = [newAssets[index + 1], newAssets[index]];
+      }
+      return { ...prev, assets: newAssets };
+    });
+  };
+
   const handleUpdateLiability = (l: Liability) => {
     setData(prev => {
       const exists = prev.liabilities.some(item => item.id === l.id);
@@ -350,6 +367,18 @@ function App() {
   
   const handleDeleteLiability = (id: string) => {
     setData(prev => ({ ...prev, liabilities: prev.liabilities.filter(l => l.id !== id) }));
+  };
+
+  const handleReorderLiability = (index: number, direction: 'up' | 'down') => {
+    setData(prev => {
+      const newLiabilities = [...prev.liabilities];
+      if (direction === 'up' && index > 0) {
+        [newLiabilities[index], newLiabilities[index - 1]] = [newLiabilities[index - 1], newLiabilities[index]];
+      } else if (direction === 'down' && index < newLiabilities.length - 1) {
+        [newLiabilities[index], newLiabilities[index + 1]] = [newLiabilities[index + 1], newLiabilities[index]];
+      }
+      return { ...prev, liabilities: newLiabilities };
+    });
   };
 
   const handleAddCustomCategory = (c: CustomCategory) => {
@@ -374,15 +403,14 @@ function App() {
     });
   };
 
-  const handleDeleteRecurringTransaction = (id: string, deleteAllHistory: boolean) => {
+  const handleDeleteRecurringTransaction = (id: string, deleteStrategy: 'all' | 'future' | 'none', fromDate?: string) => {
     let newAssets = [...data.assets];
     let newLiabilities = [...data.liabilities];
     let updatedTransactions = [...data.transactions];
 
-    if (deleteAllHistory) {
+    if (deleteStrategy === 'all') {
       const linkedTransactions = updatedTransactions.filter(t => t.recurringRuleId === id);
       
-      // Revert balances only for processed transactions
       linkedTransactions.forEach(transaction => {
         if (transaction.processed !== false) {
             reverseTransactionEffect(transaction, newAssets, newLiabilities);
@@ -390,6 +418,17 @@ function App() {
       });
 
       updatedTransactions = updatedTransactions.filter(t => t.recurringRuleId !== id);
+    } else if (deleteStrategy === 'future' && fromDate) {
+       // Filter for transactions belonging to this rule AND are occurring on or after the target date
+       const linkedTransactions = updatedTransactions.filter(t => t.recurringRuleId === id && t.date >= fromDate);
+       
+       linkedTransactions.forEach(transaction => {
+        if (transaction.processed !== false) {
+            reverseTransactionEffect(transaction, newAssets, newLiabilities);
+        }
+      });
+      
+      updatedTransactions = updatedTransactions.filter(t => !(t.recurringRuleId === id && t.date >= fromDate));
     }
 
     setData(prev => ({
@@ -573,8 +612,10 @@ function App() {
             liabilities={data.liabilities}
             onUpdateAsset={handleUpdateAsset}
             onDeleteAsset={handleDeleteAsset}
+            onReorderAsset={handleReorderAsset}
             onUpdateLiability={handleUpdateLiability}
             onDeleteLiability={handleDeleteLiability}
+            onReorderLiability={handleReorderLiability}
           />
         )}
 
